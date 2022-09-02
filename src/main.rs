@@ -3,7 +3,7 @@ mod player;
 mod library;
 mod midi_listener;
 use std::env;
-use std::io::{stdin, stdout, Write};
+use std::io::{stdin};
 use std::error::Error;
 use std::sync::mpsc::{self, TryRecvError};
 use std::thread::sleep;
@@ -44,7 +44,30 @@ fn get_album_index(key: u8) -> u8 {
 
 fn run() -> Result<(), Box<dyn Error>> {
     let args: Vec<_> = env::args().collect();
-    
+
+    if args.contains(&String::from("list-devices")) {
+        let host = default_host();
+        let output_devices = host.output_devices().unwrap();
+        println!("Available output devices:");
+        for (i, device) in output_devices.enumerate() {
+            println!("Device {}: {:?}", i, device.name().unwrap());
+        }
+        return Ok(());
+    };
+
+    let output_device_arg = args.iter()
+        .find(|&x| x.starts_with("output_device="));
+
+    let output_device_name = match output_device_arg {
+        Some(output_device_arg)  => {
+            let device_name:String = output_device_arg.clone().chars().skip(14).collect();
+            println!("Device name provided by argument: {:?}", device_name);
+            Some(device_name)
+        }
+        None => {
+            None
+        }
+    };
 
     let library_arg = args.iter()
         .find(|&x| x.starts_with("library="));
@@ -56,50 +79,14 @@ fn run() -> Result<(), Box<dyn Error>> {
             library_folder
         }
         None => {
-            let library_folder = String::from("audio");
-            println!("No library folder argument provided. Taking default: audio");
-            library_folder
-        }
-    };
-
-    let host = default_host();
-    let output_devices = host.output_devices().unwrap();
-
-    let output_device_arg = args.iter()
-        .find(|&x| x.starts_with("output_device="));
-
-    let active_device = match output_device_arg {
-        Some(device_arg) => {
-            let device_name:String = device_arg.clone().chars().skip(14).collect();
-            println!("Device name provided by argument: {:?}", device_name);
-
-            host.output_devices().unwrap()
-                .filter(|dev| dev.name().unwrap() == device_name )
-                .next().ok_or("Device provided by argument is unknown!").unwrap()
-        }
-        None => {
-            println!("Available output devices:");
-            for (i, device) in output_devices.enumerate() {
-                println!("Device {}: {:?}", i, device.name().unwrap());
-            }
-        
-            print!("Please select output device: ");
-            stdout().flush()?;
-            let mut input = String::new();
-            stdin().read_line(&mut input)?;
-            let index = input.trim().parse::<usize>()?;
-
-            host.output_devices().unwrap()
-                .enumerate()
-                .filter(|&(i, _)| i == index )
-                .map(|(_, e)| e)
-                .next().unwrap()
+            println!("Please provide a library folder.");
+            return Ok(())
         }
     };
 
 
     let library = Library::new(library_folder);
-    let mut player = Player::new(library, &active_device);
+    let mut player = Player::new(library, output_device_name);
 
     let (tx, rx) = mpsc::channel::<u8>();
 

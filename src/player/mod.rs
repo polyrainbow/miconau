@@ -5,8 +5,10 @@ use std::thread::{sleep, JoinHandle};
 use std::{fs::File};
 use std::io::BufReader;
 use rodio::{Decoder, OutputStream, Sink, Device, OutputStreamHandle, StreamError};
-
+use rodio::cpal::default_host;
 use crate::library::{Library};
+use rodio::cpal::traits::HostTrait;
+use rodio::DeviceTrait;
 
 
 pub struct CurrentIndexes {
@@ -16,8 +18,8 @@ pub struct CurrentIndexes {
 
 // we need to keep a reference to all those rodio interfaces because otherwise
 // playback would be dropped
-pub struct Player<'a> {
-    pub output_device: &'a Device,
+pub struct Player {
+    pub output_device_name: Option<String>,
     pub output_stream: Option<OutputStream>,
     pub sink_transmitter: Option<Sender<u8>>,
     pub library: Library,
@@ -25,15 +27,41 @@ pub struct Player<'a> {
     pub sink_thread_handle: Option<JoinHandle<()>>
 }
 
-impl Player<'_> {
-    pub fn new(library: Library, output_device: &Device) -> Player {
+impl Player {
+    pub fn new(library: Library, output_device_name: Option<String>) -> Player {
         return Player {
-            output_device,
+            output_device_name,
             sink_transmitter: None,
             output_stream: None,
             library,
             current_indexes: None,
             sink_thread_handle: None,
+        }
+    }
+
+
+    fn get_device(&mut self) -> Option<Device> {
+        let host = default_host();
+
+        match &self.output_device_name {
+            Some(output_device_name) => {
+                let device = host.output_devices().unwrap()
+                .filter(|dev| dev.name().unwrap() == output_device_name.to_string() )
+                .next();
+
+                match device {
+                    Some(device) => {
+                        return Some(device)
+                    }
+                    None => {
+                        println!("Device {} provided by argument is unknown or not available!", output_device_name);
+                        return None
+                    }
+                }
+            }
+            None => {
+                None
+            }
         }
     }
 
@@ -51,18 +79,26 @@ impl Player<'_> {
     }
 
 
-    fn get_stream_handle(&mut self) -> Result<(OutputStream, OutputStreamHandle), StreamError> {
+    fn get_stream_handle(&mut self, device: Option<Device>) -> Result<(OutputStream, OutputStreamHandle), StreamError> {
         // with ALSA we can get only one output stream at a time, so let's
         // destroy the old one first
         // (on Mac, it seems we can obtain several output streams at once)
         self.output_stream = None;
-        return OutputStream::try_from_device(&self.output_device);
+        match device {
+            Some(device) => {
+                OutputStream::try_from_device(&device)
+            }
+            None => {
+                OutputStream::try_default()
+            }
+        }
     } 
 
 
     fn play_track(&mut self, album_index: u8, track_index: u8) {
         self.stop();
-        match self.get_stream_handle() {
+        let device = self.get_device();
+        match self.get_stream_handle(device) {
             Ok((stream, stream_handle)) => {
                 let source = self.get_source(album_index, track_index);
                 let (tx, rx) = mpsc::channel::<u8>();
@@ -183,6 +219,10 @@ impl Player<'_> {
             }
             None => (),
         }
+
+        self.sink_thread_handle = None;
+        self.sink_transmitter = None;
+        self.output_stream = None;
 
         // wait until sink thread is terminated
         sleep(Duration::from_millis(100));

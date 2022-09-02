@@ -18,6 +18,12 @@ Example:
 cargo run library=/mnt/usb1/Music midi_device_index=1 output_device=plughw:CARD=Audio,DEV=0
 ```
 
+## List available audio devices
+
+```
+cargo run list-devices
+```
+
 ## Key bindings
 
 ![Key bindings](./assets/keys.jpg)
