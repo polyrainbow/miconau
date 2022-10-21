@@ -18,7 +18,7 @@ use library::Library;
 use midi_listener::listen;
 
 static WHITE_KEYS:[u8; 7] = [0, 2, 4, 5, 7, 9, 11];
-static START_OCTAVE: u8 = 2;
+static START_OCTAVE: u8 = 1;
 
 fn main() {
     match run() {
