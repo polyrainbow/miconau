@@ -18,13 +18,12 @@ impl Library {
         let allowed_extensions = vec!["mp3", "flac"];
         let mut library = Library { albums: Vec::new() };
         let paths = fs::read_dir(library_folder).unwrap();
-        for (i, path_result) in paths.enumerate() {
+        for path_result in paths {
             let path = path_result.unwrap();
             let attr = fs::metadata(path.path()).unwrap();
             if attr.is_dir() {
-                println!("Album {} found: {}", i, path.path().display());
                 let mut album = Album {
-                    title: path.path().into_os_string().into_string().unwrap(),
+                    title: path.path().file_name().unwrap().to_owned().into_string().unwrap(),
                     tracks: Vec::new(),
                 };
 
@@ -41,7 +40,6 @@ impl Library {
                             let filename_without_path = path_buf.file_name().unwrap();
                             let filename_is_valid = !filename_without_path.to_owned().into_string().unwrap().starts_with(".");
                             if attr.is_file() && allowed_extensions.contains(&extension_str) && filename_is_valid {
-                                println!("Track found: {}", dir_entry.path().display());
                                 let track = Track {
                                     filename: dir_entry.path(),
                                 };
@@ -63,6 +61,11 @@ impl Library {
             }
         }
 
+        library.albums.sort_by_key(|a| a.title.clone());
+        println!("Found {} albums:", library.albums.len());
+        for (i, album) in library.albums.iter().enumerate() {
+            println!("{}: {} ({} tracks)", i, album.title, album.tracks.len());
+        }
         return library;
     }
 }
