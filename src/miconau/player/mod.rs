@@ -1,6 +1,6 @@
 use std::sync::mpsc::{self, TryRecvError, Sender};
 use std::time::Duration;
-use std::{cmp, thread};
+use std::{thread};
 use std::thread::{sleep, JoinHandle};
 use std::{fs::File};
 use std::io::BufReader;
@@ -9,26 +9,44 @@ use rodio::cpal::default_host;
 use crate::library::{Library};
 use rodio::cpal::traits::HostTrait;
 use rodio::DeviceTrait;
+use std::io::Cursor;
+use std::mem::replace;
 
-
-pub struct CurrentIndexes {
+#[derive(Debug, Copy, Clone)]
+pub struct Indexes {
     pub album: u8,
     pub track: u8,
+}
+
+#[derive(Debug, Copy, Clone)]
+enum PlaybackSourceDescriptor {
+    LibraryTrack(Indexes),
+    ErrorSound,
+}
+
+enum AudioSource<'a> {
+    LibrarySource(Decoder<BufReader<File>>),
+    ErrorSource(Decoder<Cursor<&'a [u8]>>),
 }
 
 // we need to keep a reference to all those rodio interfaces because otherwise
 // playback would be dropped
 pub struct Player {
-    pub output_device_name: Option<String>,
-    pub output_stream: Option<OutputStream>,
-    pub sink_transmitter: Option<Sender<u8>>,
+    output_device_name: Option<String>,
+    output_stream: Option<OutputStream>,
+    sink_transmitter: Option<Sender<u8>>,
     pub library: Library,
-    pub current_indexes: Option<CurrentIndexes>,
-    pub sink_thread_handle: Option<JoinHandle<()>>
+    current_indexes: Option<Indexes>,
+    sink_thread_handle: Option<JoinHandle<()>>,
+    error_sound: &'static [u8],
 }
 
 impl Player {
-    pub fn new(library: Library, output_device_name: Option<String>) -> Player {
+    pub fn new(
+        library: Library,
+        output_device_name: Option<String>,
+        error_sound: &'static [u8],
+    ) -> Player {
         return Player {
             output_device_name,
             sink_transmitter: None,
@@ -36,6 +54,7 @@ impl Player {
             library,
             current_indexes: None,
             sink_thread_handle: None,
+            error_sound,
         }
     }
 
@@ -66,16 +85,18 @@ impl Player {
     }
 
 
-    fn get_source(&mut self, album_index: u8, track_index: u8) -> Decoder<BufReader<File>> {
-        let album = &self.library.albums[album_index as usize];
-        let track = &album.tracks[track_index as usize];
+    fn get_source(&mut self, indexes: Indexes) -> Decoder<BufReader<File>>{
+        let album = &self.library.albums[indexes.album as usize];
+        let track = &album.tracks[indexes.track as usize];
         let filename = &track.filename;
-        println!("Playing {}-{}: {:?}", album_index, track_index, filename);
-        // Load a sound from a file, using a path relative to Cargo.toml
+        println!("Playing {}-{}: {:?}", indexes.album + 1, indexes.track + 1, filename);
         let file = BufReader::new(File::open(&filename).unwrap());
-        // Decode that sound file into a source
-        let source = Decoder::new(file).unwrap();
-        return source;
+        Decoder::new(file).unwrap()
+    }
+
+
+    fn get_error_sound_decoder(&self) -> Decoder<Cursor<&'static [u8]>> {
+        Decoder::new(Cursor::new(self.error_sound)).unwrap()
     }
 
 
@@ -92,19 +113,34 @@ impl Player {
                 OutputStream::try_default()
             }
         }
-    } 
+    }
 
 
-    fn play_track(&mut self, album_index: u8, track_index: u8) {
+    fn play_track(&mut self, source_descriptor: PlaybackSourceDescriptor) {
         self.stop();
         let device = self.get_device();
         match self.get_stream_handle(device) {
             Ok((stream, stream_handle)) => {
-                let source = self.get_source(album_index, track_index);
+                let audio_source = match source_descriptor {
+                    PlaybackSourceDescriptor::LibraryTrack(indexes) => {
+                        AudioSource::LibrarySource(self.get_source(indexes))
+                    }
+                    PlaybackSourceDescriptor::ErrorSound => {
+                        AudioSource::ErrorSource(self.get_error_sound_decoder())
+                    }
+                };
                 let (tx, rx) = mpsc::channel::<u8>();
                 let join_handle = thread::spawn(move || {
                     let sink = Sink::try_new(&stream_handle).unwrap();
-                    sink.append(source);
+                    match audio_source {
+                        AudioSource::LibrarySource(source) => {
+                            sink.append(source);
+                        }
+                        AudioSource::ErrorSource(source) => {
+                            sink.append(source);
+                        }
+                    }
+                    
         
                     loop {
                         sleep(Duration::from_millis(100));
@@ -133,12 +169,13 @@ impl Player {
         
                 self.sink_transmitter = Some(tx);
                 self.sink_thread_handle = Some(join_handle);
-        
                 self.output_stream = Some(stream);
-                self.current_indexes = Some(CurrentIndexes {
-                    album: album_index,
-                    track: track_index,
-                });
+
+                if let PlaybackSourceDescriptor::LibraryTrack(indexes) = source_descriptor {
+                    self.current_indexes = Some(indexes);
+                } else {
+                    self.current_indexes = None;
+                }
             }
             Err(e) => {
                 println!("Could not obtain stream: {}", e);
@@ -147,15 +184,33 @@ impl Player {
     }
 
 
+    /* PUBLIC FUNCTIONS */
+
+
     pub fn play_album(&mut self, album_index: u8) {
-        self.play_track(cmp::min(album_index, (self.library.albums.len() - 1) as u8), 0);
+        if album_index < self.library.albums.len() as u8 {
+            self.play_track(PlaybackSourceDescriptor::LibraryTrack(Indexes {
+                album: album_index,
+                track: 0,
+            }));
+        } else {
+            self.play_error();
+        }
+    }
+
+
+    pub fn play_error(&mut self) {
+        self.play_track(PlaybackSourceDescriptor::ErrorSound);
     }
 
 
     pub fn play_pause(&mut self) {
         match &self.sink_transmitter {
             Some(sink_transmitter) => {
-                sink_transmitter.send(1).unwrap();
+                match sink_transmitter.send(1) {
+                    Ok(_) => (),
+                    Err(_) => (),
+                };
                 return ();
             }
             None => match &self.current_indexes {
@@ -176,12 +231,18 @@ impl Player {
                 let there_is_a_track_before
                     = current_indexes.track > 0;
 
-                if there_is_a_track_before {
-                    self.play_track(current_indexes.album, current_indexes.track - 1);
-                } else {
-                    let new_track = self.library.albums[current_indexes.album as usize].tracks.len() - 1;
-                    self.play_track(current_indexes.album, new_track as u8);
-                }
+                self.play_track(
+                    PlaybackSourceDescriptor::LibraryTrack(
+                        Indexes {
+                            album: current_indexes.album,
+                            track: if there_is_a_track_before {
+                                current_indexes.track - 1
+                            } else {
+                                0
+                            }
+                        }
+                    ),
+                );
             }
             None => {
                 println!("[previous_track] No album selected");
@@ -196,14 +257,40 @@ impl Player {
                 let there_is_another_track
                     = current_indexes.track < (self.library.albums[current_indexes.album as usize].tracks.len() - 1) as u8;
 
-                if there_is_another_track {
-                    self.play_track(current_indexes.album, current_indexes.track + 1);
-                } else {
-                    self.play_track(current_indexes.album, 0);
-                }
+                self.play_track(
+                    PlaybackSourceDescriptor::LibraryTrack(
+                        Indexes {
+                            album: current_indexes.album,
+                            track: if there_is_another_track {
+                                current_indexes.track + 1
+                            } else {
+                                0
+                            }
+                        }
+                    ),
+                );
             }
             None => {
                 println!("[next_track] No album selected");
+            }
+        }
+    }
+
+
+    fn handle_sink_thread_finish(&mut self) {
+        if self.current_indexes.is_some() {
+            self.next_track();
+        }
+    }
+
+
+    fn is_finished(&self) -> bool {
+        match &self.sink_thread_handle {
+            Some(thread_handle) => {
+                thread_handle.is_finished()
+            }
+            None => {
+                false
             }
         }
     }
@@ -220,12 +307,23 @@ impl Player {
             None => (),
         }
 
-        self.sink_thread_handle = None;
+        if self.sink_thread_handle.is_some() {
+            let old_sink_thread_handle = replace(
+                &mut self.sink_thread_handle,
+                None,
+            );
+            old_sink_thread_handle.unwrap().join().unwrap();
+        }
+
         self.sink_transmitter = None;
         self.output_stream = None;
+    }
 
-        // wait until sink thread is terminated
-        sleep(Duration::from_millis(100));
+
+    pub fn loop_routine(&mut self) {
+        if self.is_finished() {
+            self.handle_sink_thread_finish();
+        }
     }
 
 }

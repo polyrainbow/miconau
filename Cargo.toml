@@ -1,10 +1,19 @@
 [package]
 name = "miconau"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2021"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-midir = "0.8.0"
-rodio = "0.15.0"
+clap = { version = "4.1.6", features = [ "derive" ] }
+midir = "0.9.1"
+rodio = "0.17.0"
+
+[[bin]]
+name = "miconau"
+path = "src/miconau/main.rs"
+
+[[bin]]
+name = "list-devices"
+path = "src/list-devices/main.rs"
