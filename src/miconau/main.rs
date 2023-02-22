@@ -9,7 +9,6 @@ use std::error::Error;
 use std::sync::mpsc::{self, TryRecvError};
 use std::thread::sleep;
 use std::time::Duration;
-use std::num::NonZeroU8;
 use player::Player;
 use library::Library;
 use midi_listener::listen;
@@ -31,7 +30,7 @@ fn handle_midi_key_press(received: u8, start_octave: u8, player: &mut Player) {
     if is_white_key(received) {
         let album_index = get_album_index(
             received,
-            NonZeroU8::new(start_octave).unwrap(),
+            start_octave,
         );
 
         match album_index {

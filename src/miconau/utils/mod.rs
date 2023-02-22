@@ -1,5 +1,3 @@
-use std::num::NonZeroU8;
-
 static WHITE_KEYS:[u8; 7] = [0, 2, 4, 5, 7, 9, 11];
 
 // https://www.inspiredacoustics.com/en/MIDI_note_numbers_and_center_frequencies
@@ -8,7 +6,7 @@ pub fn is_white_key(key: u8) -> bool {
 }
 
 
-pub fn get_album_index(key: u8, start_octave: NonZeroU8) -> Option<u8> {
+pub fn get_album_index(key: u8, start_octave: u8) -> Option<u8> {
   let octave = key / 12;
 
   let index_within_octave = WHITE_KEYS.iter()
@@ -21,7 +19,7 @@ pub fn get_album_index(key: u8, start_octave: NonZeroU8) -> Option<u8> {
                   octave * WHITE_KEYS.len() as u8
                   + index_within_octave as u8
               ).overflowing_sub(
-                  u8::from(start_octave) * WHITE_KEYS.len() as u8,
+                  start_octave * WHITE_KEYS.len() as u8,
               );
 
           if overflow {
@@ -46,6 +44,8 @@ mod tests {
 
     #[test]
     fn is_white_key_works() {
+        assert!(is_white_key(0)); // lowest possible C
+
         assert!(is_white_key(48)); // C
         assert!(!is_white_key(49)); // C#
         assert!(is_white_key(50)); // D
@@ -64,30 +64,30 @@ mod tests {
     #[test]
     fn get_album_index_works() {
         // low key with high offset octave, album index is always 0
-        assert!(get_album_index(21, NonZeroU8::new(10).unwrap()).is_none()); // A
-        assert!(get_album_index(22, NonZeroU8::new(10).unwrap()).is_none()); // Bb
-        assert!(get_album_index(23, NonZeroU8::new(10).unwrap()).is_none()); // B
-        assert!(get_album_index(24, NonZeroU8::new(10).unwrap()).is_none()); // C
-        assert!(get_album_index(25, NonZeroU8::new(10).unwrap()).is_none()); // C#
-        assert!(get_album_index(26, NonZeroU8::new(10).unwrap()).is_none()); // D
-        assert!(get_album_index(27, NonZeroU8::new(10).unwrap()).is_none()); // D#
-        assert!(get_album_index(28, NonZeroU8::new(10).unwrap()).is_none()); // E
+        assert!(get_album_index(21, 10).is_none()); // A
+        assert!(get_album_index(22, 10).is_none()); // Bb
+        assert!(get_album_index(23, 10).is_none()); // B
+        assert!(get_album_index(24, 10).is_none()); // C
+        assert!(get_album_index(25, 10).is_none()); // C#
+        assert!(get_album_index(26, 10).is_none()); // D
+        assert!(get_album_index(27, 10).is_none()); // D#
+        assert!(get_album_index(28, 10).is_none()); // E
 
         // octave offset = 1
-        assert_eq!(get_album_index(12, NonZeroU8::new(1).unwrap()).unwrap(), 0); // C
-        assert!(get_album_index(13, NonZeroU8::new(1).unwrap()).is_none()); // C#
-        assert_eq!(get_album_index(14, NonZeroU8::new(1).unwrap()).unwrap(), 1); // D
-        assert!(get_album_index(15, NonZeroU8::new(1).unwrap()).is_none()); // D#
-        assert_eq!(get_album_index(16, NonZeroU8::new(1).unwrap()).unwrap(), 2); // E
+        assert_eq!(get_album_index(12, 1).unwrap(), 0); // C
+        assert!(get_album_index(13, 1).is_none()); // C#
+        assert_eq!(get_album_index(14, 1).unwrap(), 1); // D
+        assert!(get_album_index(15, 1).is_none()); // D#
+        assert_eq!(get_album_index(16, 1).unwrap(), 2); // E
 
         // octave offset = 2
-        assert_eq!(get_album_index(24, NonZeroU8::new(2).unwrap()).unwrap(), 0); // C
-        assert!(get_album_index(25, NonZeroU8::new(2).unwrap()).is_none()); // C#
-        assert_eq!(get_album_index(26, NonZeroU8::new(2).unwrap()).unwrap(), 1); // D
-        assert!(get_album_index(27, NonZeroU8::new(2).unwrap()).is_none()); // D#
-        assert_eq!(get_album_index(28, NonZeroU8::new(2).unwrap()).unwrap(), 2); // E
+        assert_eq!(get_album_index(24, 2).unwrap(), 0); // C
+        assert!(get_album_index(25, 2).is_none()); // C#
+        assert_eq!(get_album_index(26, 2).unwrap(), 1); // D
+        assert!(get_album_index(27, 2).is_none()); // D#
+        assert_eq!(get_album_index(28, 2).unwrap(), 2); // E
 
-        assert_eq!(get_album_index(36, NonZeroU8::new(2).unwrap()).unwrap(), 7); // Higher C
+        assert_eq!(get_album_index(36, 2).unwrap(), 7); // Higher C
 
     }
 }
