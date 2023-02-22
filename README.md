@@ -7,21 +7,17 @@ You can control the audio with the black keys.
 ## Usage
 
 ```
-cargo run
-```
-In this simple mode, the program will prompt you for configuration. Instead, you may also pass args to the start command:
-```
-cargo run library=[PATH_TO_LIBRARY] midi_device_index=[MIDI_INPUT_DEVICE_INDEX] output_device=[AUDIO_OUTPUT_DEVICE_NAME]
+cargo run --bin miconau -- --library-folder [PATH_TO_LIBRARY] --midi-device-index [MIDI_INPUT_DEVICE_INDEX] --output-device [AUDIO_OUTPUT_DEVICE_NAME] --start-octave [START_OCTAVE]
 ```
 Example: 
 ```
-cargo run library=/mnt/usb1/Music midi_device_index=1 output_device=plughw:CARD=Audio,DEV=0
+cargo run --bin miconau -- --library-folder /mnt/usb1/Music --midi-device-index 1 --output-device plughw:CARD=Audio,DEV=0 --start-octave 4
 ```
 
 ## List available audio devices
 
 ```
-cargo run list-devices
+cargo run --bin list-devices
 ```
 
 ## Key bindings

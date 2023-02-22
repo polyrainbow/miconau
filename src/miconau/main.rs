@@ -16,7 +16,6 @@ use midi_listener::listen;
 use utils::*;
 use args::get_args;
 
-static START_OCTAVE: u8 = 4;
 static MAIN_LOOP_INTERVAL: u64 = 50; // ms
 
 fn main() {
@@ -27,12 +26,12 @@ fn main() {
 }
 
 
-fn handle_midi_key_press(received: u8, player: &mut Player) {
+fn handle_midi_key_press(received: u8, start_octave: u8, player: &mut Player) {
 
     if is_white_key(received) {
         let album_index = get_album_index(
             received,
-            NonZeroU8::new(START_OCTAVE).unwrap(),
+            NonZeroU8::new(start_octave).unwrap(),
         );
 
         match album_index {
@@ -105,7 +104,11 @@ fn run() -> Result<(), Box<dyn Error>> {
                 match rx.try_recv() {
                     Ok(received) => {
                         println!("MIDI key pressed: {}", received);
-                        handle_midi_key_press(received, &mut player);
+                        handle_midi_key_press(
+                            received,
+                            args.start_octave,
+                            &mut player,
+                        );
                     }
                     Err(TryRecvError::Empty) => {}
                     Err(error) => {

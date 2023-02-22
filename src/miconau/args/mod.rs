@@ -12,6 +12,9 @@ pub struct Args {
 
     #[arg(short, long)]
     pub midi_device_index: Option<u8>,
+
+    #[arg(short, long)]
+    pub start_octave: u8,
 }
 
 pub fn get_args() -> Args {
