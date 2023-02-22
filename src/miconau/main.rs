@@ -15,7 +15,7 @@ use midi_listener::listen;
 use utils::*;
 use args::get_args;
 
-static MAIN_LOOP_INTERVAL: u64 = 50; // ms
+static MAIN_LOOP_INTERVAL: Duration = Duration::from_millis(50);
 
 fn main() {
     match run() {
@@ -98,7 +98,7 @@ fn run() -> Result<(), Box<dyn Error>> {
             println!("MIDI device present. Listening!");
 
             loop {
-                sleep(Duration::from_millis(MAIN_LOOP_INTERVAL));
+                sleep(MAIN_LOOP_INTERVAL);
                 player.loop_routine();
                 match rx.try_recv() {
                     Ok(received) => {
