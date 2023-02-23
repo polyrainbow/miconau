@@ -1,42 +1,30 @@
-static WHITE_KEYS:[u8; 7] = [0, 2, 4, 5, 7, 9, 11];
+static WHITE_KEYS: [u8; 7] = [0, 2, 4, 5, 7, 9, 11];
 
 // https://www.inspiredacoustics.com/en/MIDI_note_numbers_and_center_frequencies
 pub fn is_white_key(key: u8) -> bool {
-  return WHITE_KEYS.contains(&(key % 12));
+    return WHITE_KEYS.contains(&(key % 12));
 }
-
 
 pub fn get_album_index(key: u8, start_octave: u8) -> Option<u8> {
-  let octave = key / 12;
+    let octave = key / 12;
 
-  let index_within_octave = WHITE_KEYS.iter()
-      .position(|&x| x == (key) % 12);
+    let index_within_octave = WHITE_KEYS.iter().position(|&x| x == (key) % 12);
 
-  match index_within_octave {
-      Some(index_within_octave) => {
-          let (album_index, overflow)
-              = (
-                  octave * WHITE_KEYS.len() as u8
-                  + index_within_octave as u8
-              ).overflowing_sub(
-                  start_octave * WHITE_KEYS.len() as u8,
-              );
+    match index_within_octave {
+        Some(index_within_octave) => {
+            let (album_index, overflow) = (octave * WHITE_KEYS.len() as u8
+                + index_within_octave as u8)
+                .overflowing_sub(start_octave * WHITE_KEYS.len() as u8);
 
-          if overflow {
-              None
-          } else {
-              Some(album_index)
-          }
-      }
-      None => {
-          None
-      }
-  }
-
+            if overflow {
+                None
+            } else {
+                Some(album_index)
+            }
+        }
+        None => None,
+    }
 }
-
-
-
 
 #[cfg(test)]
 mod tests {
@@ -88,6 +76,5 @@ mod tests {
         assert_eq!(get_album_index(28, 2).unwrap(), 2); // E
 
         assert_eq!(get_album_index(36, 2).unwrap(), 7); // Higher C
-
     }
 }

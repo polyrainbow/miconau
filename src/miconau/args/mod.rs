@@ -18,5 +18,5 @@ pub struct Args {
 }
 
 pub fn get_args() -> Args {
-  Args::parse()
+    Args::parse()
 }

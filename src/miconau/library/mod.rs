@@ -1,4 +1,7 @@
-use std::{fs::{self}, path::PathBuf};
+use std::{
+    fs::{self},
+    path::PathBuf,
+};
 
 pub struct Track {
     pub filename: PathBuf,
@@ -23,7 +26,13 @@ impl Library {
             let attr = fs::metadata(path.path()).unwrap();
             if attr.is_dir() {
                 let mut album = Album {
-                    title: path.path().file_name().unwrap().to_owned().into_string().unwrap(),
+                    title: path
+                        .path()
+                        .file_name()
+                        .unwrap()
+                        .to_owned()
+                        .into_string()
+                        .unwrap(),
                     tracks: Vec::new(),
                 };
 
@@ -32,14 +41,21 @@ impl Library {
                     let dir_entry = path_result.unwrap();
                     let path_buf = dir_entry.path();
                     let extension_as_path = path_buf.as_path().extension();
-                    
+
                     match extension_as_path {
                         Some(os_str) => {
                             let extension_str = os_str.to_str().unwrap();
                             let attr = fs::metadata(dir_entry.path()).unwrap();
                             let filename_without_path = path_buf.file_name().unwrap();
-                            let filename_is_valid = !filename_without_path.to_owned().into_string().unwrap().starts_with(".");
-                            if attr.is_file() && allowed_extensions.contains(&extension_str) && filename_is_valid {
+                            let filename_is_valid = !filename_without_path
+                                .to_owned()
+                                .into_string()
+                                .unwrap()
+                                .starts_with(".");
+                            if attr.is_file()
+                                && allowed_extensions.contains(&extension_str)
+                                && filename_is_valid
+                            {
                                 let track = Track {
                                     filename: dir_entry.path(),
                                 };
@@ -69,4 +85,3 @@ impl Library {
         return library;
     }
 }
-
