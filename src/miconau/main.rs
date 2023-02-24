@@ -9,7 +9,6 @@ use library::Library;
 use midi_listener::listen;
 use player::Player;
 use std::error::Error;
-use std::io::stdin;
 use std::sync::mpsc::{self, TryRecvError};
 use std::thread::sleep;
 use std::time::Duration;
@@ -103,11 +102,10 @@ fn run() -> Result<(), Box<dyn Error>> {
         Err(_e) => {
             println!("No MIDI device detected.");
             player.play_album(0);
-            let mut input = String::new();
-            input.clear();
-            stdin().read_line(&mut input)?; // wait for next enter key press
+            loop {
+                sleep(MAIN_LOOP_INTERVAL);
+                player.loop_routine();
+            }
         }
-    }
-
-    Ok(())
+    };
 }
