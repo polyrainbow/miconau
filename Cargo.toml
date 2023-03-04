@@ -8,7 +8,7 @@ edition = "2021"
 [dependencies]
 clap = { version = "4.1.6", features = [ "derive" ] }
 midir = "0.9.1"
-rodio = "0.17.0"
+rodio = "0.17.1"
 
 [[bin]]
 name = "miconau"
