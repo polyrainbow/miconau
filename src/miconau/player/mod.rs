@@ -10,10 +10,7 @@ use std::fs::File;
 use std::io::BufReader;
 use std::io::Cursor;
 use std::mem::replace;
-use std::sync::mpsc::{self, Sender, TryRecvError};
-use std::thread;
-use std::thread::{sleep, JoinHandle};
-use std::time::Duration;
+use std::sync::mpsc::{Sender};
 
 #[derive(Debug, Copy, Clone)]
 pub struct Indexes {
@@ -37,12 +34,11 @@ enum AudioSource<'a> {
 pub struct Player {
     output_device_name: Option<String>,
     output_stream: Option<OutputStream>,
-    sink_transmitter: Option<Sender<u8>>,
     main_thread_sender: Sender<MainThreadEvent>,
-    pub library: Library,
+    library: Library,
     current_indexes: Option<Indexes>,
-    sink_thread_handle: Option<JoinHandle<()>>,
     error_sound: &'static [u8],
+    active_sink: Option<Sink>,
 }
 
 impl Player {
@@ -54,13 +50,12 @@ impl Player {
     ) -> Player {
         return Player {
             output_device_name,
-            sink_transmitter: None,
             output_stream: None,
             library,
             current_indexes: None,
-            sink_thread_handle: None,
             main_thread_sender,
             error_sound,
+            active_sink: None,
         };
     }
 
@@ -135,7 +130,6 @@ impl Player {
                         AudioSource::ErrorSource(self.get_error_sound_decoder())
                     }
                 };
-                let (tx, rx) = mpsc::channel::<u8>();
 
                 let main_thread_sender = self.main_thread_sender.clone();
 
@@ -145,51 +139,21 @@ impl Player {
                         .unwrap();
                 });
 
-                let join_handle = thread::spawn(move || {
-                    let sink = Sink::try_new(&stream_handle).unwrap();
-                    match audio_source {
-                        AudioSource::LibrarySource(source) => {
-                            sink.append(source);
-                        }
-                        AudioSource::ErrorSource(source) => {
-                            sink.append(source);
-                        }
+                let sink = Sink::try_new(&stream_handle).unwrap();
+                match audio_source {
+                    AudioSource::LibrarySource(source) => {
+                        sink.append(source);
                     }
-
-                    // append callback source that triggers an event in the 
-                    // main thread to update the player
-                    sink.append::<Callback<f32>>(Callback::new(on_sink_empty));
-
-                    loop {
-                        sleep(Duration::from_millis(100));
-                        if sink.empty() {
-                            return;
-                        }
-                        match rx.try_recv() {
-                            Ok(1) => {
-                                if sink.is_paused() {
-                                    sink.play();
-                                } else {
-                                    sink.pause();
-                                }
-                            }
-                            Ok(_) => {
-                                break;
-                            }
-                            Err(TryRecvError::Disconnected) => {
-                                println!(
-                                    "Terminating sink thread because of TryRecvError::Disconnected"
-                                );
-                                break;
-                            }
-                            Err(TryRecvError::Empty) => {}
-                        }
+                    AudioSource::ErrorSource(source) => {
+                        sink.append(source);
                     }
-                });
+                }
 
-                self.sink_transmitter = Some(tx);
-                self.sink_thread_handle = Some(join_handle);
+                // append callback source that triggers an event in the 
+                // main thread to update the player
+                sink.append::<Callback<f32>>(Callback::new(on_sink_empty));
                 self.output_stream = Some(stream);
+                self.active_sink = Some(sink);
 
                 if let PlaybackSourceDescriptor::LibraryTrack(indexes) = source_descriptor {
                     self.current_indexes = Some(indexes);
@@ -221,12 +185,13 @@ impl Player {
     }
 
     pub fn play_pause(&mut self) {
-        match &self.sink_transmitter {
-            Some(sink_transmitter) => {
-                match sink_transmitter.send(1) {
-                    Ok(_) => (),
-                    Err(_) => (),
-                };
+        match &self.active_sink {
+            Some(sink) => {
+                if sink.is_paused() {
+                    sink.play();
+                } else {
+                    sink.pause();
+                }
                 return ();
             }
             None => match &self.current_indexes {
@@ -291,20 +256,15 @@ impl Player {
     }
 
     pub fn stop(&mut self) {
-        match &self.sink_transmitter {
-            Some(sink_transmitter) => match sink_transmitter.send(0) {
-                Ok(_) => (),
-                Err(_) => (),
-            },
-            None => (),
+        let old_sink = replace(&mut self.active_sink, None);
+        match old_sink {
+            Some(old_sink) => {
+                old_sink.stop();
+                old_sink.detach();
+            }
+            None => ()
         }
 
-        if self.sink_thread_handle.is_some() {
-            let old_sink_thread_handle = replace(&mut self.sink_thread_handle, None);
-            old_sink_thread_handle.unwrap().join().unwrap();
-        }
-
-        self.sink_transmitter = None;
         self.output_stream = None;
     }
 
