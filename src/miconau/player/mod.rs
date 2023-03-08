@@ -1,4 +1,7 @@
+use crate::MainThreadEvent;
 use crate::library::Library;
+use crate::callback_source::Callback;
+
 use rodio::cpal::default_host;
 use rodio::cpal::traits::HostTrait;
 use rodio::DeviceTrait;
@@ -35,6 +38,7 @@ pub struct Player {
     output_device_name: Option<String>,
     output_stream: Option<OutputStream>,
     sink_transmitter: Option<Sender<u8>>,
+    main_thread_sender: Sender<MainThreadEvent>,
     pub library: Library,
     current_indexes: Option<Indexes>,
     sink_thread_handle: Option<JoinHandle<()>>,
@@ -46,6 +50,7 @@ impl Player {
         library: Library,
         output_device_name: Option<String>,
         error_sound: &'static [u8],
+        main_thread_sender: Sender<MainThreadEvent>,
     ) -> Player {
         return Player {
             output_device_name,
@@ -54,6 +59,7 @@ impl Player {
             library,
             current_indexes: None,
             sink_thread_handle: None,
+            main_thread_sender,
             error_sound,
         };
     }
@@ -130,6 +136,15 @@ impl Player {
                     }
                 };
                 let (tx, rx) = mpsc::channel::<u8>();
+
+                let main_thread_sender = self.main_thread_sender.clone();
+
+                let on_sink_empty = Box::new(move || {
+                    main_thread_sender
+                        .send(MainThreadEvent::PlayerEvent)
+                        .unwrap();
+                });
+
                 let join_handle = thread::spawn(move || {
                     let sink = Sink::try_new(&stream_handle).unwrap();
                     match audio_source {
@@ -140,6 +155,10 @@ impl Player {
                             sink.append(source);
                         }
                     }
+
+                    // append callback source that triggers an event in the 
+                    // main thread to update the player
+                    sink.append::<Callback<f32>>(Callback::new(on_sink_empty));
 
                     loop {
                         sleep(Duration::from_millis(100));
@@ -271,13 +290,6 @@ impl Player {
         }
     }
 
-    fn is_finished(&self) -> bool {
-        match &self.sink_thread_handle {
-            Some(thread_handle) => thread_handle.is_finished(),
-            None => false,
-        }
-    }
-
     pub fn stop(&mut self) {
         match &self.sink_transmitter {
             Some(sink_transmitter) => match sink_transmitter.send(0) {
@@ -296,9 +308,8 @@ impl Player {
         self.output_stream = None;
     }
 
-    pub fn loop_routine(&mut self) {
-        if self.is_finished() {
-            self.handle_sink_thread_finish();
-        }
+    pub fn handle_player_event(&mut self) {
+        self.handle_sink_thread_finish()
     }
+
 }

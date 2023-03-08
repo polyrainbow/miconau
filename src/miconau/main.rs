@@ -4,17 +4,19 @@ mod library;
 mod midi_listener;
 mod player;
 mod utils;
+mod callback_source;
 use args::get_args;
 use library::Library;
 use midi_listener::listen;
 use player::Player;
 use std::error::Error;
-use std::sync::mpsc::{self, TryRecvError};
-use std::thread::sleep;
-use std::time::Duration;
+use std::sync::mpsc::{self};
 use utils::*;
 
-static MAIN_LOOP_INTERVAL: Duration = Duration::from_millis(50);
+pub enum MainThreadEvent {
+    MIDIEvent(u8),
+    PlayerEvent,
+}
 
 fn main() {
     match run() {
@@ -67,45 +69,48 @@ fn run() -> Result<(), Box<dyn Error>> {
     let args = get_args();
 
     let library = Library::new(args.library_folder);
-    let mut player = Player::new(library, args.output_device, error_sound);
+    let (main_thread_sender, rx) = mpsc::channel::<MainThreadEvent>();
+    let tx_for_player = main_thread_sender.clone();
+    let tx_for_midi_listener = main_thread_sender;
 
-    let (tx, rx) = mpsc::channel::<u8>();
+    // we'll pass a sender to player so that it can use the main event loop
+    // to update its state
+    let mut player = Player::new(
+        library,
+        args.output_device,
+        error_sound,
+        tx_for_player,
+    );
 
     if args.midi_device_index.is_some() {
         println!(
-            "MIDI device index provided as argument: {}",
+            "MIDI device index provided via CLI argument: {}",
             args.midi_device_index.unwrap(),
         );
     }
 
-    let midi_connection = listen(tx, args.midi_device_index);
+    let midi_connection = listen(
+        tx_for_midi_listener,
+        args.midi_device_index,
+    );
 
-    match midi_connection {
-        Ok(_v) => {
-            println!("MIDI device present. Listening!");
+    if midi_connection.is_err() {
+        println!("No MIDI device detected. Playing first album.");
+        player.play_album(0);
+    }
 
-            loop {
-                sleep(MAIN_LOOP_INTERVAL);
-                player.loop_routine();
-                match rx.try_recv() {
-                    Ok(received) => {
-                        println!("MIDI key pressed: {}", received);
-                        handle_midi_key_press(received, args.start_octave, &mut player);
-                    }
-                    Err(TryRecvError::Empty) => {}
-                    Err(error) => {
-                        println!("{:?}", error)
-                    }
-                }
+    loop {
+        match rx.recv() {
+            Ok(MainThreadEvent::MIDIEvent(received)) => {
+                println!("MIDI key pressed: {}", received);
+                handle_midi_key_press(received, args.start_octave, &mut player);
+            }
+            Ok(MainThreadEvent::PlayerEvent) => {
+                player.handle_player_event();
+            }
+            Err(error) => {
+                println!("{:?}", error)
             }
         }
-        Err(_e) => {
-            println!("No MIDI device detected.");
-            player.play_album(0);
-            loop {
-                sleep(MAIN_LOOP_INTERVAL);
-                player.loop_routine();
-            }
-        }
-    };
+    }
 }

@@ -4,8 +4,10 @@ use std::error::Error;
 use std::io::{stdin, stdout, Write};
 use std::sync::mpsc::Sender;
 
+use crate::MainThreadEvent;
+
 pub fn listen(
-    tx: Sender<u8>,
+    tx: Sender<MainThreadEvent>,
     input_port_index: Option<u8>,
 ) -> Result<MidiInputConnection<()>, Box<dyn Error>> {
     let mut midi_in = MidiInput::new("midir reading input").unwrap();
@@ -42,7 +44,7 @@ pub fn listen(
         },
     };
 
-    println!("\nOpening connection");
+    println!("\nOpening MIDI connection...");
     let in_port_name = midi_in.port_name(in_port)?;
 
     // conn_in needs to be a named parameter, because it needs to be kept alive until the end of the scope
@@ -53,14 +55,14 @@ pub fn listen(
             if message[0] == 144 && message[2] > 0 {
                 // if it's a noteOn message with velocity higher than 0
                 let note = message[1];
-                tx.send(note).unwrap();
+                tx.send(MainThreadEvent::MIDIEvent(note)).unwrap();
             }
         },
         (),
     )?;
 
     println!(
-        "Connection open, reading input from '{}' (press enter to exit) ...",
+        "MIDI connection open, reading input from '{}'",
         in_port_name
     );
     return Ok(conn_in);
