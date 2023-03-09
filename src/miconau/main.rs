@@ -1,10 +1,10 @@
 extern crate midir;
 mod args;
+mod callback_source;
 mod library;
 mod midi_listener;
 mod player;
 mod utils;
-mod callback_source;
 use args::get_args;
 use library::Library;
 use midi_listener::listen;
@@ -75,12 +75,7 @@ fn run() -> Result<(), Box<dyn Error>> {
 
     // we'll pass a sender to player so that it can use the main event loop
     // to update its state
-    let mut player = Player::new(
-        library,
-        args.output_device,
-        error_sound,
-        tx_for_player,
-    );
+    let mut player = Player::new(library, args.output_device, error_sound, tx_for_player);
 
     if args.midi_device_index.is_some() {
         println!(
@@ -89,10 +84,7 @@ fn run() -> Result<(), Box<dyn Error>> {
         );
     }
 
-    let midi_connection = listen(
-        tx_for_midi_listener,
-        args.midi_device_index,
-    );
+    let midi_connection = listen(tx_for_midi_listener, args.midi_device_index);
 
     if midi_connection.is_err() {
         println!("No MIDI device detected. Playing first album.");

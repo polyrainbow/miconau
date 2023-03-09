@@ -1,6 +1,6 @@
-use crate::MainThreadEvent;
-use crate::library::Library;
 use crate::callback_source::Callback;
+use crate::library::Library;
+use crate::MainThreadEvent;
 
 use rodio::cpal::default_host;
 use rodio::cpal::traits::HostTrait;
@@ -9,7 +9,7 @@ use rodio::{Decoder, Device, OutputStream, OutputStreamHandle, Sink, StreamError
 use std::fs::File;
 use std::io::BufReader;
 use std::io::Cursor;
-use std::sync::mpsc::{Sender};
+use std::sync::mpsc::Sender;
 
 #[derive(Debug, Copy, Clone)]
 pub struct Indexes {
@@ -104,21 +104,17 @@ impl Player {
         Decoder::new(Cursor::new(self.error_sound)).unwrap()
     }
 
-    fn prepare_sink(
-        &mut self,
-        device: Option<Device>,
-    ) -> Result<(), StreamError> {
+    fn prepare_sink(&mut self, device: Option<Device>) -> Result<(), StreamError> {
         // with ALSA we can get only one output stream at a time, so let's
         // destroy the old one first
         // (on Mac, it seems we can obtain several output streams at once)
 
-        if
-            self.output_stream.is_some()
+        if self.output_stream.is_some()
             && self.output_stream_handle.is_some()
             && self.active_sink.is_some()
         {
             self.active_sink.as_mut().unwrap().stop();
-            return Ok(())
+            return Ok(());
         }
 
         self.output_stream = None;
@@ -136,11 +132,8 @@ impl Player {
                         self.output_stream_handle = Some(handle);
                         Ok(())
                     }
-                    Err(error) => {
-                        Err(error)
-                    }
+                    Err(error) => Err(error),
                 }
-
             }
             None => {
                 let output_stream_result = OutputStream::try_default();
@@ -152,11 +145,8 @@ impl Player {
                         self.output_stream_handle = Some(handle);
                         Ok(())
                     }
-                    Err(error) => {
-                        Err(error)
-                    }
+                    Err(error) => Err(error),
                 }
-
             }
         }
     }
@@ -191,9 +181,12 @@ impl Player {
             }
         }
 
-        // append callback source that triggers an event in the 
+        // append callback source that triggers an event in the
         // main thread to update the player
-        self.active_sink.as_mut().unwrap().append::<Callback<f32>>(Callback::new(on_sink_empty));
+        self.active_sink
+            .as_mut()
+            .unwrap()
+            .append::<Callback<f32>>(Callback::new(on_sink_empty));
         self.active_sink.as_mut().unwrap().play();
 
         if let PlaybackSourceDescriptor::LibraryTrack(indexes) = source_descriptor {
@@ -301,5 +294,4 @@ impl Player {
     pub fn handle_player_event(&mut self) {
         self.handle_sink_finish()
     }
-
 }
