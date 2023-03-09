@@ -9,7 +9,6 @@ use rodio::{Decoder, Device, OutputStream, OutputStreamHandle, Sink, StreamError
 use std::fs::File;
 use std::io::BufReader;
 use std::io::Cursor;
-use std::mem::replace;
 use std::sync::mpsc::{Sender};
 
 #[derive(Debug, Copy, Clone)]
@@ -34,6 +33,7 @@ enum AudioSource<'a> {
 pub struct Player {
     output_device_name: Option<String>,
     output_stream: Option<OutputStream>,
+    output_stream_handle: Option<OutputStreamHandle>,
     main_thread_sender: Sender<MainThreadEvent>,
     library: Library,
     current_indexes: Option<Indexes>,
@@ -51,6 +51,7 @@ impl Player {
         return Player {
             output_device_name,
             output_stream: None,
+            output_stream_handle: None,
             library,
             current_indexes: None,
             main_thread_sender,
@@ -103,68 +104,103 @@ impl Player {
         Decoder::new(Cursor::new(self.error_sound)).unwrap()
     }
 
-    fn get_stream_handle(
+    fn prepare_sink(
         &mut self,
         device: Option<Device>,
-    ) -> Result<(OutputStream, OutputStreamHandle), StreamError> {
+    ) -> Result<(), StreamError> {
         // with ALSA we can get only one output stream at a time, so let's
         // destroy the old one first
         // (on Mac, it seems we can obtain several output streams at once)
+
+        if
+            self.output_stream.is_some()
+            && self.output_stream_handle.is_some()
+            && self.active_sink.is_some()
+        {
+            self.active_sink.as_mut().unwrap().stop();
+            return Ok(())
+        }
+
         self.output_stream = None;
+        self.output_stream_handle = None;
+        self.active_sink = None;
+
         match device {
-            Some(device) => OutputStream::try_from_device(&device),
-            None => OutputStream::try_default(),
+            Some(device) => {
+                let output_stream_result = OutputStream::try_from_device(&device);
+
+                match output_stream_result {
+                    Ok((stream, handle)) => {
+                        self.active_sink = Some(Sink::try_new(&handle).unwrap());
+                        self.output_stream = Some(stream);
+                        self.output_stream_handle = Some(handle);
+                        Ok(())
+                    }
+                    Err(error) => {
+                        Err(error)
+                    }
+                }
+
+            }
+            None => {
+                let output_stream_result = OutputStream::try_default();
+
+                match output_stream_result {
+                    Ok((stream, handle)) => {
+                        self.active_sink = Some(Sink::try_new(&handle).unwrap());
+                        self.output_stream = Some(stream);
+                        self.output_stream_handle = Some(handle);
+                        Ok(())
+                    }
+                    Err(error) => {
+                        Err(error)
+                    }
+                }
+
+            }
         }
     }
 
     fn play_track(&mut self, source_descriptor: PlaybackSourceDescriptor) {
-        self.stop();
         let device = self.get_device();
-        match self.get_stream_handle(device) {
-            Ok((stream, stream_handle)) => {
-                let audio_source = match source_descriptor {
-                    PlaybackSourceDescriptor::LibraryTrack(indexes) => {
-                        AudioSource::LibrarySource(self.get_source(indexes))
-                    }
-                    PlaybackSourceDescriptor::ErrorSound => {
-                        AudioSource::ErrorSource(self.get_error_sound_decoder())
-                    }
-                };
+        self.prepare_sink(device).unwrap();
 
-                let main_thread_sender = self.main_thread_sender.clone();
-
-                let on_sink_empty = Box::new(move || {
-                    main_thread_sender
-                        .send(MainThreadEvent::PlayerEvent)
-                        .unwrap();
-                });
-
-                let sink = Sink::try_new(&stream_handle).unwrap();
-                match audio_source {
-                    AudioSource::LibrarySource(source) => {
-                        sink.append(source);
-                    }
-                    AudioSource::ErrorSource(source) => {
-                        sink.append(source);
-                    }
-                }
-
-                // append callback source that triggers an event in the 
-                // main thread to update the player
-                sink.append::<Callback<f32>>(Callback::new(on_sink_empty));
-                self.output_stream = Some(stream);
-                self.active_sink = Some(sink);
-
-                if let PlaybackSourceDescriptor::LibraryTrack(indexes) = source_descriptor {
-                    self.current_indexes = Some(indexes);
-                } else {
-                    self.current_indexes = None;
-                }
+        let audio_source = match source_descriptor {
+            PlaybackSourceDescriptor::LibraryTrack(indexes) => {
+                AudioSource::LibrarySource(self.get_source(indexes))
             }
-            Err(e) => {
-                println!("Could not obtain stream: {}", e);
+            PlaybackSourceDescriptor::ErrorSound => {
+                AudioSource::ErrorSource(self.get_error_sound_decoder())
             }
         };
+
+        let main_thread_sender = self.main_thread_sender.clone();
+
+        let on_sink_empty = Box::new(move || {
+            main_thread_sender
+                .send(MainThreadEvent::PlayerEvent)
+                .unwrap();
+        });
+
+        match audio_source {
+            AudioSource::LibrarySource(source) => {
+                self.active_sink.as_mut().unwrap().append(source);
+            }
+            AudioSource::ErrorSource(source) => {
+                self.active_sink.as_mut().unwrap().append(source);
+            }
+        }
+
+        // append callback source that triggers an event in the 
+        // main thread to update the player
+        self.active_sink.as_mut().unwrap().append::<Callback<f32>>(Callback::new(on_sink_empty));
+        self.active_sink.as_mut().unwrap().play();
+
+        if let PlaybackSourceDescriptor::LibraryTrack(indexes) = source_descriptor {
+            self.current_indexes = Some(indexes);
+        } else {
+            self.current_indexes = None;
+        }
     }
 
     /* PUBLIC FUNCTIONS */
@@ -249,27 +285,21 @@ impl Player {
         }
     }
 
-    fn handle_sink_thread_finish(&mut self) {
+    fn handle_sink_finish(&mut self) {
         if self.current_indexes.is_some() {
             self.next_track();
         }
     }
 
     pub fn stop(&mut self) {
-        let old_sink = replace(&mut self.active_sink, None);
-        match old_sink {
-            Some(old_sink) => {
-                old_sink.stop();
-                old_sink.detach();
-            }
-            None => ()
-        }
-
+        // Dropping the `Sink` stops all sounds.
+        self.active_sink = None;
         self.output_stream = None;
+        self.output_stream_handle = None;
     }
 
     pub fn handle_player_event(&mut self) {
-        self.handle_sink_thread_finish()
+        self.handle_sink_finish()
     }
 
 }
