@@ -1,5 +1,5 @@
 extern crate midir;
-use midir::{Ignore, MidiInput, MidiInputConnection};
+use midir::{MidiInput, MidiInputConnection};
 use std::error::Error;
 use std::io::{stdin, stdout, Write};
 use std::sync::mpsc::Sender;
@@ -10,8 +10,7 @@ pub fn listen(
     tx: Sender<MainThreadEvent>,
     input_port_index: Option<u8>,
 ) -> Result<MidiInputConnection<()>, Box<dyn Error>> {
-    let mut midi_in = MidiInput::new("midir reading input").unwrap();
-    midi_in.ignore(Ignore::None);
+    let midi_in = MidiInput::new("midir reading input").unwrap();
 
     // Get an input port (read from console if multiple are available)
     let in_ports = midi_in.ports();
