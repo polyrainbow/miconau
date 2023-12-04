@@ -1,10 +1,10 @@
-use crate::callback_source::Callback;
 use crate::library::Library;
 use crate::MainThreadEvent;
 
 use rodio::cpal::default_host;
 use rodio::cpal::traits::HostTrait;
 use rodio::DeviceTrait;
+use rodio::source::EmptyCallback;
 use rodio::{Decoder, Device, OutputStream, OutputStreamHandle, Sink, StreamError};
 use std::fs::File;
 use std::io::BufReader;
@@ -186,7 +186,7 @@ impl Player {
         self.active_sink
             .as_mut()
             .unwrap()
-            .append::<Callback<f32>>(Callback::new(on_sink_empty));
+            .append::<EmptyCallback<f32>>(EmptyCallback::new(on_sink_empty));
         self.active_sink.as_mut().unwrap().play();
 
         if let PlaybackSourceDescriptor::LibraryTrack(indexes) = source_descriptor {

@@ -1,6 +1,5 @@
 extern crate midir;
 mod args;
-mod callback_source;
 mod library;
 mod midi_listener;
 mod player;
