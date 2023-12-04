@@ -63,7 +63,7 @@ impl Library {
                             }
                         }
                         None => {
-                            break;
+                            continue;
                         }
                     }
                 }
