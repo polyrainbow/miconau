@@ -78,6 +78,7 @@ impl Library {
         }
 
         library.albums.sort_by_key(|a| a.title.clone());
+        library.albums.sort_by_key(|a| a.title.clone().to_lowercase());
         println!("Found {} albums.", library.albums.len());
         for (i, album) in library.albums.iter().enumerate() {
             println!("{}: {} ({} tracks)", i + 1, album.title, album.tracks.len());
