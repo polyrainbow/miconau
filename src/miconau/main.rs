@@ -51,7 +51,7 @@ fn handle_midi_key_press(received: u8, start_octave: u8, player: &mut Player) {
     }
 
     if received_within_octave == 6 {
-        player.previous_track();
+        player.play_previous_track();
     }
 
     if received_within_octave == 8 {
@@ -59,7 +59,7 @@ fn handle_midi_key_press(received: u8, start_octave: u8, player: &mut Player) {
     }
 
     if received_within_octave == 10 {
-        player.next_track();
+        player.play_next_track();
     }
 }
 

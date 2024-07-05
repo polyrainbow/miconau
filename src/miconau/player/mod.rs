@@ -11,6 +11,8 @@ use std::io::BufReader;
 use std::io::Cursor;
 use std::sync::mpsc::Sender;
 
+const REPEAT_ALL:bool = false;
+
 #[derive(Debug, Copy, Clone)]
 pub struct Indexes {
     pub album: u8,
@@ -196,6 +198,19 @@ impl Player {
         }
     }
 
+    fn is_there_another_track(&self) -> bool {
+        match &self.current_indexes {
+            Some(current_indexes) => {
+                current_indexes.track
+                    < (self.library.albums[current_indexes.album as usize]
+                        .tracks
+                        .len()
+                        - 1) as u8
+            }
+            None => false
+        }
+    }
+
     /* PUBLIC FUNCTIONS */
 
     pub fn play_album(&mut self, album_index: u8) {
@@ -234,7 +249,7 @@ impl Player {
         }
     }
 
-    pub fn previous_track(&mut self) {
+    pub fn play_previous_track(&mut self) {
         match &self.current_indexes {
             Some(current_indexes) => {
                 let there_is_a_track_before = current_indexes.track > 0;
@@ -249,38 +264,32 @@ impl Player {
                 }));
             }
             None => {
-                println!("[previous_track] No album selected");
+                println!("[play_previous_track] No album selected");
             }
         }
     }
 
-    pub fn next_track(&mut self) {
+    pub fn play_next_track(&mut self) {
         match &self.current_indexes {
             Some(current_indexes) => {
-                let there_is_another_track = current_indexes.track
-                    < (self.library.albums[current_indexes.album as usize]
-                        .tracks
-                        .len()
-                        - 1) as u8;
-
                 self.play_track(PlaybackSourceDescriptor::LibraryTrack(Indexes {
                     album: current_indexes.album,
-                    track: if there_is_another_track {
-                        current_indexes.track + 1
-                    } else {
-                        0
-                    },
+                    track: if self.is_there_another_track() {
+                      current_indexes.track + 1
+                    } else { 0 },
                 }));
             }
             None => {
-                println!("[next_track] No album selected");
+                println!("[play_next_track] No album selected");
             }
         }
     }
 
     fn handle_sink_finish(&mut self) {
         if self.current_indexes.is_some() {
-            self.next_track();
+            if self.is_there_another_track() || REPEAT_ALL {
+              self.play_next_track();
+            }
         }
     }
 
