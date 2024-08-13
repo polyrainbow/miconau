@@ -1,32 +1,41 @@
 use std::{
-    fs::{self},
-    path::PathBuf,
+    fs::{self, File}, io::BufReader, path::PathBuf
 };
+use std::io::BufRead;
 
 pub struct Track {
     pub filename: PathBuf,
 }
 
-pub struct Album {
+pub struct Playlist {
     pub title: String,
     pub tracks: Vec<Track>,
 }
 
+pub struct Stream {
+    pub url: String,
+}
+
 pub struct Library {
-    pub albums: Vec<Album>,
+    pub playlists: Vec<Playlist>,
+    pub streams: Vec<Stream>,
 }
 
 impl Library {
     pub fn new(library_folder: String) -> Library {
         let allowed_extensions = vec!["mp3", "flac"];
-        let mut library = Library { albums: Vec::new() };
+        let mut streams_file_found = false;
+        let mut library = Library {
+            playlists: Vec::new(),
+            streams: Vec::new(),
+        };
         let paths = fs::read_dir(library_folder).unwrap();
         for path_result in paths {
-            let path = path_result.unwrap();
-            let attr = fs::metadata(path.path()).unwrap();
-            if attr.is_dir() {
-                let mut album = Album {
-                    title: path
+            let root_dir_entry = path_result.unwrap();
+            let metadata = fs::metadata(root_dir_entry.path()).unwrap();
+            if metadata.is_dir() {
+                let mut album = Playlist {
+                    title: root_dir_entry
                         .path()
                         .file_name()
                         .unwrap()
@@ -36,7 +45,7 @@ impl Library {
                     tracks: Vec::new(),
                 };
 
-                let paths_in_album = fs::read_dir(path.path()).unwrap();
+                let paths_in_album = fs::read_dir(root_dir_entry.path()).unwrap();
                 for path_result in paths_in_album {
                     let dir_entry = path_result.unwrap();
                     let path_buf = dir_entry.path();
@@ -70,16 +79,38 @@ impl Library {
 
                 album.tracks.sort_by_key(|a| a.filename.clone());
 
-                // don't push empty albums to the library
+                // don't push empty playlists to the library
                 if album.tracks.len() > 0 {
-                    library.albums.push(album);
+                    library.playlists.push(album);
+                }
+            }
+
+            if metadata.is_file() && root_dir_entry.file_name() == "streams.txt" {
+                streams_file_found = true;
+                println!("Streams file found");
+                let file = File::open(root_dir_entry.path()).unwrap();
+                let reader = BufReader::new(file);
+
+                for line in reader.lines() {
+                    match line {
+                        Ok(url) => {
+                            let trimmed = String::from(url.trim());
+                            library.streams.push(Stream{url: trimmed.clone()});
+                            println!("Stream {} found: {}", library.streams.len(), trimmed);
+                        }
+                        _ => {}
+                    }
                 }
             }
         }
 
-        library.albums.sort_by_key(|a| a.title.clone().to_lowercase());
-        println!("Found {} albums.", library.albums.len());
-        for (i, album) in library.albums.iter().enumerate() {
+        if !streams_file_found {
+            println!("No streams file found.");
+        }
+
+        library.playlists.sort_by_key(|a| a.title.clone().to_lowercase());
+        println!("Found {} playlists.", library.playlists.len());
+        for (i, album) in library.playlists.iter().enumerate() {
             println!("{}: {} ({} tracks)", i + 1, album.title, album.tracks.len());
         }
         return library;

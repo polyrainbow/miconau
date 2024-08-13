@@ -1,18 +1,22 @@
 # Miconau (MIDI controlled audio player)
 
-A basic audio player that is controlled via MIDI note-on events. Plays most common audio formats (mp3, flac, etc.).
+A audio player that is controlled via MIDI note-on events.
 On startup, the application will scan your audio library and assign every album to a white key on the keyboard.
-You can control the audio with the black keys.
+You can control the audio with the black keys. Uses mpv under the hood which can play a lot of audio file and stream formats.
 
 ## Usage
+Make sure mpv is installed and in PATH. Windows is not supported.
 
 ```
-cargo run --bin miconau -- --library-folder [PATH_TO_LIBRARY] --midi-device-index [MIDI_INPUT_DEVICE_INDEX] --output-device [AUDIO_OUTPUT_DEVICE_NAME] --start-octave [START_OCTAVE]
+cargo run --bin miconau -- --library-folder [PATH_TO_LIBRARY] --midi-device-index [MIDI_INPUT_DEVICE_INDEX] --start-octave [START_OCTAVE]
 ```
 Example: 
 ```
-cargo run --bin miconau -- --library-folder /mnt/usb1/Music --midi-device-index 1 --output-device plughw:CARD=Audio,DEV=0 --start-octave 4
+cargo run --bin miconau -- --library-folder /mnt/usb1/Music --midi-device-index 1 --start-octave 4
 ```
+
+Add a `streams.txt` file in the library folder with a line-separated list of
+stream urls. These streams are then assigned to the lowest white keys.
 
 ## List available audio devices
 
