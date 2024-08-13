@@ -4,20 +4,35 @@ use std::thread::{self};
 use std::io::BufRead;
 
 
-pub fn launch_mpv() -> Child {
-  let mut process = Command::new("mpv")
-        .arg("-v")
-        .arg("--idle")
-        .arg("--no-video")
-        .arg("--no-input-default-bindings")
-        .arg("--no-config")
-        .arg("--input-ipc-server=/tmp/mpvsocket")
-        .stdin(Stdio::null())
-        .stdout(Stdio::piped())
-        .spawn()
-        .unwrap();
+pub fn launch_mpv(output_device: Option<String>) -> Child {
+  let mut args = vec![
+    "-v".to_string(),
+    "--idle".to_string(),
+    "--no-video".to_string(),
+    "--no-input-default-bindings".to_string(),
+    "--no-config".to_string(),
+    "--input-ipc-server=/tmp/mpvsocket".to_string()
+  ];
 
-        let stdout = process.stdout.take().unwrap();
+  if output_device.is_some() {
+    let output_device_str = output_device.unwrap();
+    println!("Using output device {}", output_device_str);
+    let mut arg: String = "--audio-device=".to_owned();
+    arg.push_str(&output_device_str);
+    args.push(arg.clone());
+  } else {
+    println!("No output device provided. MPV will use default one.");
+  }
+
+  let mut command = Command::new("mpv");
+  command.args(args)
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped());
+     
+  let mut process = command.spawn()
+      .unwrap();
+
+  let stdout = process.stdout.take().unwrap();
 
     let thread = thread::spawn(move || {
         let reader = BufReader::new(stdout);

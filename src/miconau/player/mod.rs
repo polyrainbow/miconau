@@ -11,9 +11,7 @@ use std::process::Child;
 static MPV_SOCKET_PATH: &str = "/tmp/mpvsocket";
 
 pub struct Player {
-    // output_device_name: Option<String>,
     pub library: Library,
-    // current_indexes: Option<Indexes>,
     mpv_process: Child,
     mpv_controller: Mpv,
 }
@@ -21,9 +19,9 @@ pub struct Player {
 impl Player {
     pub fn new(
         library: Library,
-        // output_device_name: Option<String>,
+        output_device_name: Option<String>,
     ) -> Player {
-        let mpv_process = launch_mpv();
+        let mpv_process = launch_mpv(output_device_name);
         println!("MPV process initialized");
 
         let mpv_controller = Mpv::connect(MPV_SOCKET_PATH).unwrap();
@@ -33,9 +31,7 @@ impl Player {
         ).unwrap();
 
         return Player {
-            // output_device_name,
             library,
-            // current_indexes: None,
             mpv_process,
             mpv_controller,
         };

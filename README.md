@@ -20,8 +20,10 @@ stream urls. These streams are then assigned to the lowest white keys.
 
 ## List available audio devices
 
+Use mpv to list available audio devices:
+
 ```
-cargo run --bin list-devices
+mpv --audio-device=help
 ```
 
 ## Key bindings

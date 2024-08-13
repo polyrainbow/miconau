@@ -10,12 +10,7 @@ clap = { version = "4.1.6", features = [ "derive" ] }
 ctrlc = "3.4.4"
 midir = "0.9.1"
 mpvipc = "1.3.0"
-rodio = "0.19.0"
 
 [[bin]]
 name = "miconau"
 path = "src/miconau/main.rs"
-
-[[bin]]
-name = "list-devices"
-path = "src/list-devices/main.rs"

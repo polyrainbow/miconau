@@ -84,7 +84,7 @@ fn run() -> Result<(), Box<dyn Error>> {
     let tx_for_interrupt_listener = main_thread_sender.clone();
     let tx_for_midi_listener = main_thread_sender;
 
-    let mut player = Player::new(library);
+    let mut player = Player::new(library, args.output_device);
     println!("Player module initialized");
 
     ctrlc::set_handler(move || { 
