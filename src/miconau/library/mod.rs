@@ -95,8 +95,10 @@ impl Library {
                     match line {
                         Ok(url) => {
                             let trimmed = String::from(url.trim());
-                            library.streams.push(Stream{url: trimmed.clone()});
-                            println!("Stream {} found: {}", library.streams.len(), trimmed);
+                            if trimmed.len() > 0 {
+                                library.streams.push(Stream{url: trimmed.clone()});
+                                println!("Stream {} found: {}", library.streams.len(), trimmed);
+                            }
                         }
                         _ => {}
                     }
