@@ -6,13 +6,14 @@ You can control the audio with the black keys. Uses mpv under the hood which can
 
 ## Usage
 Make sure mpv is installed and in PATH. Windows is not supported.
+Make sure, `error.wav` is in the same folder as the executable `miconau`.
 
 ```
-cargo run --bin miconau -- --library-folder [PATH_TO_LIBRARY] --midi-device-index [MIDI_INPUT_DEVICE_INDEX] --start-octave [START_OCTAVE]
+cargo run --bin miconau -- --library-folder [PATH_TO_LIBRARY] --midi-device-index [MIDI_INPUT_DEVICE_INDEX] --start-octave [START_OCTAVE] --output-device [AUDIO_OUTPUT_DEVICE]
 ```
 Example: 
 ```
-cargo run --bin miconau -- --library-folder /mnt/usb1/Music --midi-device-index 1 --start-octave 4
+cargo run --bin miconau -- --library-folder /mnt/usb1/Music --midi-device-index 1 --start-octave 4 --output-device alsa/plughw:CARD=Audio,DEV=0
 ```
 
 Add a `streams.txt` file in the library folder with a line-separated list of
