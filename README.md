@@ -31,10 +31,10 @@ mpv --audio-device=help
 
 ![Key bindings](./assets/keys.jpg)
 
-- All white keys starting from middle C: play album 1-n
+- All white keys starting from note C in `start-octave`: play stream 1-n or playlist 1-n
 - D#: Stop
-- F#: Previous track in album
+- F#: Previous track in playlist
 - G#: Play/pause
-- A#: Next track in album
+- A#: Next track in playlist
 
 
