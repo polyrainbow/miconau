@@ -17,6 +17,7 @@ pub struct Stream {
 }
 
 pub struct Library {
+    pub folder: String,
     pub playlists: Vec<Playlist>,
     pub streams: Vec<Stream>,
 }
@@ -26,6 +27,7 @@ impl Library {
         let allowed_extensions = vec!["mp3", "flac"];
         let mut streams_file_found = false;
         let mut library = Library {
+            folder: library_folder.clone(),
             playlists: Vec::new(),
             streams: Vec::new(),
         };

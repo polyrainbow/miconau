@@ -46,7 +46,7 @@ impl Player {
             let playlist = self.library.playlists.get(playlist_index as usize).unwrap();
             let title = &playlist.title;
             println!("Playing playlist {}", title);
-            let mut path = "../miconau-music-lib/".to_owned();
+            let mut path = self.library.folder.clone();
             path.push_str(title);
             self.mpv_controller.run_command(
                 MpvCommand::LoadFile {
