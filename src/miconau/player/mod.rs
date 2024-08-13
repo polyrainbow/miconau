@@ -47,6 +47,7 @@ impl Player {
             let title = &playlist.title;
             println!("Playing playlist {}", title);
             let mut path = self.library.folder.clone();
+            path.push_str("/");
             path.push_str(title);
             self.mpv_controller.run_command(
                 MpvCommand::LoadFile {
