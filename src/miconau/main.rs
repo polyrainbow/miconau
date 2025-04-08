@@ -4,15 +4,17 @@ mod library;
 mod midi_listener;
 mod player;
 mod utils;
+mod web;
 use args::get_args;
 use library::Library;
 use midi_listener::listen;
 use player::Player;
 use std::error::Error;
 use std::process::exit;
-use std::sync::mpsc::{self};
+use std::sync::{mpsc, Arc, Mutex};
 use utils::*;
 use ctrlc;
+use actix_rt;
 
 pub enum MainThreadEvent {
     MIDIEvent(u8),
@@ -84,8 +86,19 @@ fn run() -> Result<(), Box<dyn Error>> {
     let tx_for_interrupt_listener = main_thread_sender.clone();
     let tx_for_midi_listener = main_thread_sender;
 
-    let mut player = Player::new(library, args.output_device);
+    let player = Arc::new(Mutex::new(Player::new(library, args.output_device)));
     println!("Player module initialized");
+
+    // Start web server in a separate thread
+    let player_for_web = player.clone();
+    std::thread::spawn(move || {
+        let web_server = web::WebServer::new(player_for_web);
+        actix_rt::System::new().block_on(async move {
+            if let Err(e) = web_server.start().await {
+                eprintln!("Web server error: {}", e);
+            }
+        });
+    });
 
     ctrlc::set_handler(move || { 
         println!("CTRL+C");
@@ -93,7 +106,6 @@ fn run() -> Result<(), Box<dyn Error>> {
         exit(0);
     })
         .expect("Error setting Ctrl-C handler");
-
 
     if args.midi_device_index.is_some() {
         println!(
@@ -106,6 +118,7 @@ fn run() -> Result<(), Box<dyn Error>> {
 
     if midi_connection.is_err() {
         println!("No MIDI device detected. Playing first playlist from library.");
+        let mut player = player.lock().unwrap();
         player.play_playlist(0);
     }
 
@@ -113,12 +126,15 @@ fn run() -> Result<(), Box<dyn Error>> {
         match rx.recv() {
             Ok(MainThreadEvent::MIDIEvent(received)) => {
                 println!("MIDI key pressed: {}", received);
+                let mut player = player.lock().unwrap();
                 handle_midi_key_press(received, args.start_octave, &mut player);
             }
             Ok(MainThreadEvent::PlayerEvent) => {
+                let mut player = player.lock().unwrap();
                 player.handle_player_event();
             }
             Ok(MainThreadEvent::InterruptEvent) => {
+                let mut player = player.lock().unwrap();
                 player.destroy().unwrap();
             }
             Err(error) => {

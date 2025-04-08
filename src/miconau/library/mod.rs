@@ -13,6 +13,7 @@ pub struct Playlist {
 }
 
 pub struct Stream {
+    pub name: String,
     pub url: String,
 }
 
@@ -95,10 +96,14 @@ impl Library {
 
                 for line in reader.lines() {
                     match line {
-                        Ok(url) => {
-                            let trimmed = String::from(url.trim());
+                        Ok(line) => {
+                            let trimmed = String::from(line.trim());
                             if trimmed.len() > 0 {
-                                library.streams.push(Stream{url: trimmed.clone()});
+                                let (name, url) = line.split_once(":").unwrap();
+                                library.streams.push(Stream{
+                                    name: name.to_string(),
+                                    url: url.to_string(),
+                                });
                                 println!("Stream {} found: {}", library.streams.len(), trimmed);
                             }
                         }
