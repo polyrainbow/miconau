@@ -89,16 +89,22 @@ fn run() -> Result<(), Box<dyn Error>> {
     let player = Arc::new(Mutex::new(Player::new(library, args.output_device)));
     println!("Player module initialized");
 
-    // Start web server in a separate thread
-    let player_for_web = player.clone();
-    std::thread::spawn(move || {
-        let web_server = web::WebServer::new(player_for_web);
-        actix_rt::System::new().block_on(async move {
-            if let Err(e) = web_server.start().await {
-                eprintln!("Web server error: {}", e);
-            }
+    if args.address.is_some() {
+        let address = args.address.unwrap();
+        println!("Starting webserver on {}", address);
+        // Start web server in a separate thread
+        let player_for_web = player.clone();
+        std::thread::spawn(move || {
+            let web_server = web::WebServer::new(player_for_web, address);
+            actix_rt::System::new().block_on(async move {
+                if let Err(e) = web_server.start().await {
+                    eprintln!("Web server error: {}", e);
+                }
+            });
         });
-    });
+    } else {
+        println!("Web server disabled");
+    }
 
     ctrlc::set_handler(move || { 
         println!("CTRL+C");

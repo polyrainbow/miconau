@@ -24,11 +24,12 @@ struct PlaylistInfo {
 
 pub struct WebServer {
     player: Arc<Mutex<Player>>,
+    address: String,
 }
 
 impl WebServer {
-    pub fn new(player: Arc<Mutex<Player>>) -> Self {
-        WebServer { player }
+    pub fn new(player: Arc<Mutex<Player>>, address: String) -> Self {
+        WebServer { player, address }
     }
 
     pub async fn start(&self) -> std::io::Result<()> {
@@ -48,7 +49,7 @@ impl WebServer {
                 .route("/api/previous", web::post().to(previous_track))
                 .route("/", web::get().to(index))
         })
-        .bind("127.0.0.1:8080")?
+        .bind(self.address.clone())?
         .run()
         .await
     }

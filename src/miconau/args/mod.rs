@@ -15,6 +15,9 @@ pub struct Args {
 
     #[arg(short, long)]
     pub start_octave: u8,
+
+    #[arg(short, long)]
+    pub address: Option<String>,
 }
 
 pub fn get_args() -> Args {
