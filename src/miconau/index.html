@@ -51,6 +51,9 @@
             border: 1px solid #ddd;
             border-radius: 5px;
             cursor: pointer;
+            display: flex;
+            align-items: center;
+            gap: 10px;
         }
         .stream-item:hover, .playlist-item:hover {
             background-color: #f5f5f5;
@@ -64,6 +67,16 @@
             padding: 10px;
             background-color: #f8f8f8;
             border-radius: 5px;
+        }
+        .stream-logo {
+            width: 40px;
+            height: 40px;
+            object-fit: contain;
+            border-radius: 4px;
+            background-color: #f0f0f0;
+        }
+        .stream-name {
+            flex-grow: 1;
         }
     </style>
 </head>
@@ -102,7 +115,8 @@
                     <div class="stream-item" 
                          onclick="playStream(${stream.index})"
                          data-name="${stream.name}">
-                        ${stream.name}
+                        ${stream.logo ? `<img src="/logos/${stream.logo}" alt="${stream.name} logo" class="stream-logo">` : ''}
+                        <span class="stream-name">${stream.name}</span>
                     </div>
                 `).join('');
             } catch (error) {

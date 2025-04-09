@@ -85,7 +85,7 @@ fn run() -> Result<(), Box<dyn Error>> {
     let (main_thread_sender, rx) = mpsc::channel::<MainThreadEvent>();
     let tx_for_interrupt_listener = main_thread_sender.clone();
     let tx_for_midi_listener = main_thread_sender;
-
+    let logo_folder = library.logo_folder.clone();
     let player = Arc::new(Mutex::new(Player::new(library, args.output_device)));
     println!("Player module initialized");
 
@@ -95,7 +95,7 @@ fn run() -> Result<(), Box<dyn Error>> {
         // Start web server in a separate thread
         let player_for_web = player.clone();
         std::thread::spawn(move || {
-            let web_server = web::WebServer::new(player_for_web, address);
+            let web_server = web::WebServer::new(player_for_web, address, logo_folder);
             actix_rt::System::new().block_on(async move {
                 if let Err(e) = web_server.start().await {
                     eprintln!("Web server error: {}", e);

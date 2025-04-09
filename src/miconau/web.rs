@@ -1,6 +1,7 @@
 use actix_web::{web, App, HttpResponse, HttpServer, Responder};
 use serde::{Deserialize, Serialize};
 use std::sync::{Arc, Mutex};
+use std::path::Path;
 use crate::player::Player;
 
 #[derive(Serialize, Deserialize)]
@@ -14,6 +15,7 @@ struct PlayerState {
 struct StreamInfo {
     name: String,
     index: usize,
+    logo: Option<String>,
 }
 
 #[derive(Serialize)]
@@ -25,11 +27,12 @@ struct PlaylistInfo {
 pub struct WebServer {
     player: Arc<Mutex<Player>>,
     address: String,
+    logo_folder: String,
 }
 
 impl WebServer {
-    pub fn new(player: Arc<Mutex<Player>>, address: String) -> Self {
-        WebServer { player, address }
+    pub fn new(player: Arc<Mutex<Player>>, address: String, logo_folder: String) -> Self {
+        WebServer { player, address, logo_folder }
     }
 
     pub async fn start(&self) -> std::io::Result<()> {
@@ -47,11 +50,36 @@ impl WebServer {
                 .route("/api/stop", web::post().to(stop))
                 .route("/api/next", web::post().to(next_track))
                 .route("/api/previous", web::post().to(previous_track))
+                .route("/logos/{filename:.*}", web::get().to(serve_logo))
                 .route("/", web::get().to(index))
         })
         .bind(self.address.clone())?
         .run()
         .await
+    }
+}
+
+async fn serve_logo(
+    filename: web::Path<String>,
+    logo_folder: web::Data<String>,
+) -> impl Responder {
+    let logo_path = Path::new(&logo_folder.as_str()).join(&filename.into_inner());
+    println!("Serving logo from: {:?}", logo_path);
+    match std::fs::read(&logo_path) {
+        Ok(content) => {
+            let content_type = match logo_path.extension().and_then(|ext| ext.to_str()) {
+                Some("png") => "image/png",
+                Some("jpg") | Some("jpeg") => "image/jpeg",
+                Some("gif") => "image/gif",
+                Some("svg") => "image/svg+xml",
+                _ => "application/octet-stream",
+            };
+            
+            HttpResponse::Ok()
+                .content_type(content_type)
+                .body(content)
+        }
+        Err(_) => HttpResponse::NotFound().finish(),
     }
 }
 
@@ -61,8 +89,9 @@ async fn get_streams(player: web::Data<Arc<Mutex<Player>>>) -> impl Responder {
         .iter()
         .enumerate()
         .map(|(index, stream)| StreamInfo {
-            name: stream.name.clone(),
+            name: stream.title.clone(),
             index,
+            logo: stream.logo_filename.clone(),
         })
         .collect();
     HttpResponse::Ok().json(streams)

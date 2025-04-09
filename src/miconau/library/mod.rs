@@ -1,7 +1,14 @@
 use std::{
     fs::{self, File}, io::BufReader, path::PathBuf
 };
-use std::io::BufRead;
+use serde::{Deserialize, Serialize};
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct Stream {
+    pub title: String,
+    pub url: String,
+    pub logo_filename: Option<String>,
+}
 
 pub struct Track {
     pub filename: PathBuf,
@@ -12,25 +19,24 @@ pub struct Playlist {
     pub tracks: Vec<Track>,
 }
 
-pub struct Stream {
-    pub name: String,
-    pub url: String,
-}
-
 pub struct Library {
     pub folder: String,
     pub playlists: Vec<Playlist>,
     pub streams: Vec<Stream>,
+    pub logo_folder: String,
 }
 
 impl Library {
     pub fn new(library_folder: String) -> Library {
         let allowed_extensions = vec!["mp3", "flac"];
         let mut streams_file_found = false;
+        let mut logo_folder = library_folder.clone();
+        logo_folder.push_str("/logos");
         let mut library = Library {
             folder: library_folder.clone(),
             playlists: Vec::new(),
             streams: Vec::new(),
+            logo_folder: logo_folder,
         };
         let paths = fs::read_dir(library_folder).unwrap();
         for path_result in paths {
@@ -88,26 +94,19 @@ impl Library {
                 }
             }
 
-            if metadata.is_file() && root_dir_entry.file_name() == "streams.txt" {
+            if metadata.is_file() && root_dir_entry.file_name() == "streams.json" {
                 streams_file_found = true;
                 println!("Streams file found");
                 let file = File::open(root_dir_entry.path()).unwrap();
                 let reader = BufReader::new(file);
 
-                for line in reader.lines() {
-                    match line {
-                        Ok(line) => {
-                            let trimmed = String::from(line.trim());
-                            if trimmed.len() > 0 {
-                                let (name, url) = line.split_once(":").unwrap();
-                                library.streams.push(Stream{
-                                    name: name.to_string(),
-                                    url: url.to_string(),
-                                });
-                                println!("Stream {} found: {}", library.streams.len(), trimmed);
-                            }
-                        }
-                        _ => {}
+                match serde_json::from_reader::<_, Vec<Stream>>(reader) {
+                    Ok(streams) => {
+                        library.streams = streams;
+                        println!("Found {} streams.", library.streams.len());
+                    }
+                    Err(e) => {
+                        eprintln!("Error parsing streams.json: {}", e);
                     }
                 }
             }
