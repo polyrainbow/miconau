@@ -31,6 +31,7 @@ fn main() {
 
 fn run() -> Result<(), Box<dyn Error>> {
     let args = get_args();
+    let main_thread = thread::current();
 
     let library = Library::new(args.library_folder);
     let (main_thread_sender, rx) = mpsc::channel::<MainThreadEvent>();
@@ -43,11 +44,17 @@ fn run() -> Result<(), Box<dyn Error>> {
         println!("Starting webserver on {}", address);
         // Start web server in a separate thread
         let player_for_web = player.clone();
+        let player_for_web_error_handler = player.clone();
+        let main_thread_for_web_error_handler = main_thread.clone();
         std::thread::spawn(move || {
             let web_server = web::WebServer::new(player_for_web, address);
             actix_rt::System::new().block_on(async move {
                 if let Err(e) = web_server.start().await {
                     eprintln!("Web server error: {}", e);
+                    player_for_web_error_handler.lock().unwrap().destroy().unwrap();
+                    main_thread_for_web_error_handler.unpark();
+                    println!("Exiting...");
+                    exit(0);
                 }
             });
         });
@@ -67,15 +74,13 @@ fn run() -> Result<(), Box<dyn Error>> {
     let mut signals = Signals::new([SIGINT, SIGTERM])?;
     let player_for_interrupt_thread = player.clone();
 
-    let current_thread = thread::current();
-
     thread::spawn(move || {
         for sig in signals.forever() {
             println!("Received signal {:?}", sig);
             let mut player
                 = player_for_interrupt_thread.lock().unwrap();
             player.destroy().unwrap();
-            current_thread.unpark();
+            main_thread.unpark();
             println!("Exiting...");
             exit(0);
         }
