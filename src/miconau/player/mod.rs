@@ -38,7 +38,9 @@ impl Player {
     }
 
     pub fn destroy(&mut self) -> std::io::Result<()> {
-        terminate(&mut self.mpv_process)
+        terminate(&mut self.mpv_process).unwrap();
+        println!("MPV process terminated");
+        Ok(())
     }
 
     pub fn play_playlist(&mut self, playlist_index: u8) {
@@ -90,6 +92,9 @@ impl Player {
     pub fn play_error(&mut self) {
         let mut dir = env::current_exe().unwrap();
         dir.pop();
+        dir.pop();
+        dir.pop();
+        dir.push("assets");
         dir.push("error.wav");
         let dir_str = dir.to_string_lossy().deref().to_string();
 
@@ -103,7 +108,7 @@ impl Player {
 
     pub fn play_pause(&mut self) {
         let is_paused: bool = self.mpv_controller.get_property("pause").unwrap();
-        println!("is paused: {:?}", is_paused);
+        println!("setting is paused: {:?}", !is_paused);
         self.mpv_controller.set_property("pause", !is_paused)
             .expect("Error pausing")
     }

@@ -1,3 +1,5 @@
+use crate::player::Player;
+
 static WHITE_KEYS: [u8; 7] = [0, 2, 4, 5, 7, 9, 11];
 
 // https://www.inspiredacoustics.com/en/MIDI_note_numbers_and_center_frequencies
@@ -23,6 +25,57 @@ pub fn get_source_index(key: u8, start_octave: u8) -> Option<u8> {
             }
         }
         None => None,
+    }
+}
+
+
+pub fn handle_midi_key_press(received: u8, start_octave: u8, player: &mut Player) {
+    if is_white_key(received) {
+        let source_index = get_source_index(received, start_octave);
+
+        match source_index {
+            Some(source_index) => {
+                println!("Source index: {}", source_index);
+                let n_streams = player.library.streams.len() as u8;
+                let n_playlists = player.library.playlists.len() as u8;
+                if source_index < n_streams {
+                    player.play_stream(source_index);
+                } else if source_index < (n_streams + n_playlists) {
+                    let playlist_index = source_index - n_streams;
+                    player.play_playlist(playlist_index);
+                } else {
+                    println!("Source index out of range. Playing error sound.");
+                    player.play_error();
+                }
+            }
+            None => {
+                player.play_error();
+            }
+        }
+    }
+
+    // every octave, we want the function keys to
+    // repeat, so let's do % 12 everywhere
+    let received_within_octave = received % 12;
+
+    if received_within_octave == 1 {
+        player.stop();
+    }
+
+    if received_within_octave == 3 {
+        player.stop();
+    }
+
+    if received_within_octave == 6 {
+        player.play_previous_track();
+    }
+
+    if received_within_octave == 8 {
+        player.play_pause();
+    }
+
+    if received_within_octave == 10 {
+        player.play_next_track();
     }
 }
 
