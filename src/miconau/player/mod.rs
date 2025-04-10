@@ -131,8 +131,4 @@ impl Player {
             &[&"keep-playlist"],
         ).unwrap();
     }
-
-    pub fn handle_player_event(&mut self) {
-        todo!();
-    }
 }
