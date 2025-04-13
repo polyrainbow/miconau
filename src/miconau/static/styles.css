@@ -13,10 +13,6 @@ h1 {
     gap: 20px;
 }
 .section {
-    border: 1px solid #ccc;
-    padding: 20px;
-    border-radius: 5px;
-
     h2 {
         margin-top: 0;
     }
