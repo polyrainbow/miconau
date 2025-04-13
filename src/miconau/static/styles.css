@@ -52,17 +52,18 @@ button:hover {
     flex-direction: column;
     gap: 10px;
 }
-.streams summary::marker, .playlists summary::marker {
-    margin-right: 0.5em;
-}
-.streams summary button, .playlists summary button {
-    padding: 0.5em;
-}
 .stream-item, .playlist-item {
     padding: 10px;
     border: 1px solid #ddd;
     border-radius: 5px;
     cursor: pointer;
+}
+.streams {
+    flex-direction: row;
+    flex-wrap: wrap;
+}
+.stream-item {
+    width: 6em;
 }
 .stream-item:hover, .playlist-item:hover {
     background-color: #f5f5f5;
