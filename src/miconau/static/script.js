@@ -7,6 +7,11 @@ async function loadStreams() {
             <div class="stream-item" 
                  onclick="playStream(${stream.index})"
                  data-name="${stream.name}">
+                 ${
+                    stream.logo_svg
+                        ? `<img src="/api/stream-logo/${stream.name}" alt="${stream.name} icon" class="stream-icon">`
+                        : ''
+                 }
                 ${stream.name}
             </div>
         `).join('');

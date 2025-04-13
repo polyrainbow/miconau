@@ -2,7 +2,7 @@ use actix_web::{web, App, HttpResponse, HttpServer, Responder};
 use actix_files as fs;
 use serde::{Deserialize, Serialize};
 use std::sync::{Arc, Mutex};
-use crate::player::Player;
+use crate::{library::Stream, player::Player};
 
 #[derive(Serialize, Deserialize)]
 struct PlayerState {
@@ -14,6 +14,7 @@ struct PlayerState {
 #[derive(Serialize)]
 struct StreamInfo {
     name: String,
+    logo_svg: Option<String>,
     index: usize,
 }
 
@@ -41,6 +42,7 @@ impl WebServer {
             App::new()
                 .app_data(web::Data::new(player))
                 .route("/api/streams", web::get().to(get_streams))
+                .route("/api/stream-logo/{name}", web::get().to(get_stream_logo))
                 .route("/api/playlists", web::get().to(get_playlists))
                 .route("/api/play/stream/{index}", web::post().to(play_stream))
                 .route("/api/play/playlist/{index}", web::post().to(play_playlist))
@@ -63,10 +65,28 @@ async fn get_streams(player: web::Data<Arc<Mutex<Player>>>) -> impl Responder {
         .enumerate()
         .map(|(index, stream)| StreamInfo {
             name: stream.name.clone(),
+            logo_svg: stream.logo_svg.clone(),
             index,
         })
         .collect();
     HttpResponse::Ok().json(streams)
+}
+
+async fn get_stream_logo(
+    player: web::Data<Arc<Mutex<Player>>>,
+    name: web::Path<String>,
+) -> impl Responder {
+    let player = player.lock().unwrap();
+    let stream: Option<&Stream> = player.library.streams
+        .iter()
+        .find(|&x| x.name == *name);
+    if let Some(stream) = stream {
+        if let Some(logo_svg) = &stream.logo_svg {
+            return HttpResponse::Ok().content_type("image/svg+xml")
+                .body(logo_svg.clone());
+        }
+    }
+    HttpResponse::NotFound().finish()
 }
 
 async fn get_playlists(player: web::Data<Arc<Mutex<Player>>>) -> impl Responder {

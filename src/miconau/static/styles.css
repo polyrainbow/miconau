@@ -64,6 +64,14 @@ button:hover {
 }
 .stream-item {
     width: 6em;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    align-items: center;
+
+    img {
+        width: 100%;
+    }
 }
 .stream-item:hover, .playlist-item:hover {
     background-color: #f5f5f5;

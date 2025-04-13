@@ -1,7 +1,6 @@
 use std::{
-    fs::{self, File}, io::BufReader, path::PathBuf
+    fs, path::PathBuf
 };
-use std::io::BufRead;
 
 pub struct Track {
     pub filename: PathBuf,
@@ -15,6 +14,7 @@ pub struct Playlist {
 pub struct Stream {
     pub name: String,
     pub url: String,
+    pub logo_svg: Option<String>,
 }
 
 pub struct Library {
@@ -91,25 +91,60 @@ impl Library {
             if metadata.is_file() && root_dir_entry.file_name() == "streams.txt" {
                 streams_file_found = true;
                 println!("Streams file found");
-                let file = File::open(root_dir_entry.path()).unwrap();
-                let reader = BufReader::new(file);
-
-                for line in reader.lines() {
-                    match line {
-                        Ok(line) => {
-                            let trimmed = String::from(line.trim());
-                            if trimmed.len() > 0 {
-                                let (name, url) = line.split_once(":").unwrap();
-                                library.streams.push(Stream{
-                                    name: name.to_string(),
-                                    url: url.to_string(),
-                                });
-                                println!("Stream {} found: {}", library.streams.len(), trimmed);
+                let file_content = fs::read_to_string(root_dir_entry.path()).unwrap();
+                
+                // Split the content by double newlines to get blocks
+                let stream_blocks = file_content.split("\n\n");
+                
+                for block in stream_blocks {
+                    let lines: Vec<&str> = block.trim().lines().collect();
+                    
+                    // Skip empty blocks
+                    if lines.is_empty() {
+                        continue;
+                    }
+                    
+                    // Each block must have at least name and URL
+                    if lines.len() >= 2 {
+                        let name = lines[0].trim();
+                        let url = lines[1].trim();
+                        
+                        // Optional logo filename
+                        let logo_svg = if lines.len() >= 3 {
+                            let filename = lines[2].trim().to_string();
+                            let filepath = PathBuf::from(
+                                format!("{}/{}/{}", library.folder, "logos", filename),
+                            );
+                            println!("Logo file path: {:?}", filepath);
+                            let svg = fs::read_to_string(filepath);
+                            match svg {
+                                Ok(svg_content) => Some(svg_content),
+                                Err(_) => {
+                                    println!("Error reading logo file: {}", filename);
+                                    None
+                                }
                             }
-                        }
-                        _ => {}
+                        } else {
+                            None
+                        };
+
+
+                        
+                        library.streams.push(Stream {
+                            name: name.to_string(),
+                            url: url.to_string(),
+                            logo_svg: logo_svg.clone(),
+                        });
+                        
+                        println!(
+                            "Stream {} found: {}, Logo: {}",
+                            library.streams.len(),
+                            name,
+                            logo_svg.is_some(),
+                        );
                     }
                 }
+                    
             }
         }
 
