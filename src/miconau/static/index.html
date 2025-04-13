@@ -1,0 +1,40 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Miconau Player</title>
+    <link rel="stylesheet" href="styles.css">
+    <script src="script.js"></script>
+</head>
+<body>
+    <div class="container">
+        <h1>Miconau Player</h1>
+
+        <div class="controls">
+            <button onclick="playPause()" id="playPauseBtn">
+                <img src="icons/play_pause.svg" alt="Play/Pause">
+            </button>
+            <button onclick="previousTrack()">
+                <img src="icons/skip_previous.svg" alt="Previous">
+            </button>
+            <button onclick="nextTrack()">
+                <img src="icons/skip_next.svg" alt="Next">
+            </button>
+            <button onclick="stop()">
+                <img src="icons/stop.svg" alt="Stop">
+            </button>
+        </div>
+        
+        <div class="section">
+            <h2>Streams</h2>
+            <div class="streams" id="streams"></div>
+        </div>
+
+        <div class="section">
+            <h2>Playlists</h2>
+            <div class="playlists" id="playlists"></div>
+        </div>
+    </div>
+</body>
+</html> 

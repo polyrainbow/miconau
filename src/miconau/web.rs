@@ -1,4 +1,5 @@
 use actix_web::{web, App, HttpResponse, HttpServer, Responder};
+use actix_files as fs;
 use serde::{Deserialize, Serialize};
 use std::sync::{Arc, Mutex};
 use crate::player::Player;
@@ -47,7 +48,7 @@ impl WebServer {
                 .route("/api/stop", web::post().to(stop))
                 .route("/api/next", web::post().to(next_track))
                 .route("/api/previous", web::post().to(previous_track))
-                .route("/", web::get().to(index))
+                .service(fs::Files::new("/", "./src/miconau/static").index_file("index.html"))
         })
         .bind(self.address.clone())?
         .run()
@@ -121,10 +122,4 @@ async fn previous_track(player: web::Data<Arc<Mutex<Player>>>) -> impl Responder
     let mut player = player.lock().unwrap();
     player.play_previous_track();
     HttpResponse::Ok().finish()
-}
-
-async fn index() -> impl Responder {
-    HttpResponse::Ok()
-        .content_type("text/html")
-        .body(include_str!("index.html"))
 } 

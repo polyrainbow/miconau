@@ -1,0 +1,5 @@
+play_arrow
+play_pause
+skip_next
+skip_previous
+stop
