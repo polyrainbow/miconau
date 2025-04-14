@@ -1,7 +1,7 @@
 use actix_web::{web, App, HttpResponse, HttpServer, Responder};
 use actix_files as fs;
 use serde::{Deserialize, Serialize};
-use std::sync::{Arc, Mutex};
+use std::{env::current_exe, sync::{Arc, Mutex}};
 use crate::{library::Stream, player::Player};
 
 #[derive(Serialize, Deserialize)]
@@ -36,6 +36,14 @@ impl WebServer {
 
     pub async fn start(&self) -> std::io::Result<()> {
         let player = self.player.clone();
+
+        let mut static_path = current_exe().unwrap();
+        static_path.pop();
+        static_path.pop();
+        static_path.pop();
+        static_path.push("src");
+        static_path.push("miconau");
+        static_path.push("static");
         
         HttpServer::new(move || {
             let player = player.clone();
@@ -50,7 +58,10 @@ impl WebServer {
                 .route("/api/stop", web::post().to(stop))
                 .route("/api/next", web::post().to(next_track))
                 .route("/api/previous", web::post().to(previous_track))
-                .service(fs::Files::new("/", "./src/miconau/static").index_file("index.html"))
+                .service(fs::Files::new(
+                    "/",
+                    &static_path,
+                ).index_file("index.html"))
         })
         .bind(self.address.clone())?
         .run()
