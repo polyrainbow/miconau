@@ -70,7 +70,7 @@ button:hover {
     align-items: center;
 
     img {
-        width: 100%;
+        max-width: 100%;
     }
 }
 .stream-item:hover, .playlist-item:hover {
