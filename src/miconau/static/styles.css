@@ -10,7 +10,7 @@ h1 {
 .container {
     display: flex;
     flex-direction: column;
-    gap: 20px;
+    gap: 0.8em;
 }
 .section {
     h2 {
