@@ -2,18 +2,42 @@ mod mpv_process;
 
 use mpv_process::*;
 use mpvipc::{Mpv, MpvCommand, NumberChangeOptions, PlaylistAddOptions};
+use tokio::sync::{broadcast};
 
-use crate::library::Library;
+use crate::library::{Library};
 use std::env;
 use std::ops::Deref;
 use std::process::Child;
+use serde::Serialize;
 
 static MPV_SOCKET_PATH: &str = "/tmp/mpvsocket";
+
+#[derive(Serialize, Copy, Clone, Debug)]
+enum PlayerMode {
+    Paused,
+    Playing,
+    Stopped,
+}
+
+#[derive(Serialize, Copy, Clone, Debug)]
+enum SourceType {
+    Stream,
+    Playlist,
+}
+#[derive(Serialize, Clone, Debug)]
+pub struct PlayerState {
+    source_type: Option<SourceType>,
+    source_name: Option<String>,
+    mode: PlayerMode,
+}
 
 pub struct Player {
     pub library: Library,
     mpv_process: Child,
     mpv_controller: Mpv,
+    pub state: PlayerState,
+    pub state_transmitter: broadcast::Sender<PlayerState>,
+    _state_receiver: broadcast::Receiver<PlayerState>,
 }
 
 impl Player {
@@ -30,11 +54,31 @@ impl Player {
             NumberChangeOptions::Absolute,
         ).unwrap();
 
+        let (state_transmitter, _state_receiver) = broadcast::channel(1);
+
+        let initial_state = PlayerState {
+            source_type: None,
+            source_name: None,
+            mode: PlayerMode::Stopped,
+        };
+
         return Player {
             library,
             mpv_process,
             mpv_controller,
+            state: initial_state,
+            state_transmitter,
+            _state_receiver, // we need to keep the receiver to avoid dropping the channel
         };
+    }
+
+    fn set_state(&mut self, state: PlayerState) {
+        self.state = state;
+
+        match self.state_transmitter.send(self.state.clone()) {
+            Ok(_) => println!("State updated: {:?}", self.state),
+            Err(e) => println!("Error sending state update: {}", e),
+        }
     }
 
     pub fn destroy(&mut self) -> std::io::Result<()> {
@@ -62,9 +106,23 @@ impl Player {
                 "loop-playlist",
                 String::from("no"),
             ).unwrap();
+
+            self.mpv_controller.set_property("pause", false)
+                .expect("Error setting pause property to false");
+
+            self.set_state(PlayerState {
+                source_type: Some(SourceType::Playlist),
+                source_name: Some(title.clone()),
+                mode: PlayerMode::Playing,
+            });
         } else {
             println!("Playlist with index {} not found. Playing error sound.", playlist_index);
             self.play_error();
+            self.set_state(PlayerState {
+                source_type: None,
+                source_name: None,
+                mode: PlayerMode::Stopped,
+            });
         }
     }
 
@@ -83,9 +141,23 @@ impl Player {
                 "loop-playlist",
                 String::from("no"),
             ).unwrap();
+
+            self.mpv_controller.set_property("pause", false)
+                .expect("Error setting pause property to false");
+
+            self.set_state(PlayerState {
+                source_type: Some(SourceType::Stream),
+                source_name: Some(stream.name.clone()),
+                mode: PlayerMode::Playing,
+            });
         } else {
             println!("Stream with index {} not found. Playing error sound.", stream_index);
             self.play_error();
+            self.set_state(PlayerState {
+                source_type: None,
+                source_name: None,
+                mode: PlayerMode::Stopped,
+            });
         }
     }
 
@@ -110,7 +182,13 @@ impl Player {
         let is_paused: bool = self.mpv_controller.get_property("pause").unwrap();
         println!("setting is paused: {:?}", !is_paused);
         self.mpv_controller.set_property("pause", !is_paused)
-            .expect("Error pausing")
+            .expect("Error pausing");
+
+        self.set_state(PlayerState {
+            source_type: self.state.source_type,
+            source_name: self.state.source_name.clone(),
+            mode: if is_paused { PlayerMode::Playing } else { PlayerMode::Paused },
+        });
     }
 
     pub fn play_previous_track(&mut self) {
@@ -130,5 +208,11 @@ impl Player {
             "stop",
             &[&"keep-playlist"],
         ).unwrap();
+
+        self.set_state(PlayerState {
+            source_type: None,
+            source_name: None,
+            mode: PlayerMode::Stopped,
+        });
     }
 }

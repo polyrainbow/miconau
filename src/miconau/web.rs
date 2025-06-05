@@ -1,15 +1,15 @@
-use actix_web::{web, App, HttpResponse, HttpServer, Responder};
-use actix_files as fs;
-use serde::{Deserialize, Serialize};
-use std::{env::current_exe, sync::{Arc, Mutex}};
-use crate::{library::Stream, player::Player};
-
-#[derive(Serialize, Deserialize)]
-struct PlayerState {
-    current_stream: Option<String>,
-    current_playlist: Option<String>,
-    is_playing: bool,
-}
+use axum::{extract::{Path, State}, http::{header, HeaderMap, StatusCode}, response::{sse::{Event, KeepAlive}, Sse}, routing::{get, post}, Json, Router};
+use serde::{Serialize};
+use tokio::sync::Mutex;
+use tower_http::services::ServeDir;
+use std::{env::current_exe, path::PathBuf, sync::{Arc}};
+use crate::{library::Stream as AudioStream, player::{Player, PlayerState}};
+use std::error::Error;
+use axum::response::IntoResponse;
+use futures_util::stream::{Stream};
+use std::convert::Infallible;
+use futures_util::stream::StreamExt;
+use tokio_stream::wrappers::BroadcastStream;
 
 #[derive(Serialize)]
 struct StreamInfo {
@@ -24,53 +24,46 @@ struct PlaylistInfo {
     index: usize,
 }
 
-pub struct WebServer {
+#[derive(Clone)]
+struct ServerState {
     player: Arc<Mutex<Player>>,
-    address: String,
 }
 
-impl WebServer {
-    pub fn new(player: Arc<Mutex<Player>>, address: String) -> Self {
-        WebServer { player, address }
-    }
 
-    pub async fn start(&self) -> std::io::Result<()> {
-        let player = self.player.clone();
-
-        let mut static_path = current_exe().unwrap();
-        static_path.pop();
-        static_path.pop();
-        static_path.pop();
-        static_path.push("src");
-        static_path.push("miconau");
-        static_path.push("static");
-        
-        HttpServer::new(move || {
-            let player = player.clone();
-            App::new()
-                .app_data(web::Data::new(player))
-                .route("/api/streams", web::get().to(get_streams))
-                .route("/api/stream-logo/{name}", web::get().to(get_stream_logo))
-                .route("/api/playlists", web::get().to(get_playlists))
-                .route("/api/play/stream/{index}", web::post().to(play_stream))
-                .route("/api/play/playlist/{index}", web::post().to(play_playlist))
-                .route("/api/play/pause", web::post().to(play_pause))
-                .route("/api/stop", web::post().to(stop))
-                .route("/api/next", web::post().to(next_track))
-                .route("/api/previous", web::post().to(previous_track))
-                .service(fs::Files::new(
-                    "/",
-                    &static_path,
-                ).index_file("index.html"))
-        })
-        .bind(self.address.clone())?
-        .run()
-        .await
-    }
+async fn sse_handler(
+    State(server_state): State<ServerState>,
+) -> Sse<impl Stream<Item = Result<Event, Infallible>>> {
+    let player = server_state.player.lock().await;
+    let receiver = player.state_transmitter.subscribe();
+    let event_stream = BroadcastStream::new(receiver)
+        .filter_map(|result| async move {
+            match result {
+                Ok(state) => {
+                    Some(Ok(Event::default().json_data(&state).unwrap()))
+                }
+                Err(_) => None,
+            }
+        });
+    Sse::new(event_stream).keep_alive(KeepAlive::default())
 }
 
-async fn get_streams(player: web::Data<Arc<Mutex<Player>>>) -> impl Responder {
-    let player = player.lock().unwrap();
+
+fn get_static_path() -> PathBuf {
+    let mut static_path = current_exe().unwrap();
+    static_path.pop();
+    static_path.pop();
+    static_path.pop();
+    static_path.push("src");
+    static_path.push("miconau");
+    static_path.push("static");
+    static_path
+}
+
+
+async fn get_streams(
+    State(server_state): State<ServerState>
+) -> Json<Vec<StreamInfo>> {
+    let player = server_state.player.lock().await;
     let streams: Vec<StreamInfo> = player.library.streams
         .iter()
         .enumerate()
@@ -80,28 +73,35 @@ async fn get_streams(player: web::Data<Arc<Mutex<Player>>>) -> impl Responder {
             index,
         })
         .collect();
-    HttpResponse::Ok().json(streams)
+    Json(streams)
 }
 
 async fn get_stream_logo(
-    player: web::Data<Arc<Mutex<Player>>>,
-    name: web::Path<String>,
-) -> impl Responder {
-    let player = player.lock().unwrap();
-    let stream: Option<&Stream> = player.library.streams
+    State(server_state): State<ServerState>,
+    Path(name): Path<String>,
+) -> impl IntoResponse {
+    let player = server_state.player.lock().await;
+    let stream: Option<&AudioStream> = player.library.streams
         .iter()
         .find(|&x| x.name == *name);
+    println!("Getting logo for stream: {}", name);
     if let Some(stream) = stream {
         if let Some(logo_svg) = &stream.logo_svg {
-            return HttpResponse::Ok().content_type("image/svg+xml")
-                .body(logo_svg.clone());
+            let mut headers = HeaderMap::new();
+            headers.insert(header::CONTENT_TYPE, "image/svg+xml".parse().unwrap());
+            return Ok((
+                headers,
+                logo_svg.clone(),
+            ))
         }
     }
-    HttpResponse::NotFound().finish()
+    Err(StatusCode::NOT_FOUND)
 }
 
-async fn get_playlists(player: web::Data<Arc<Mutex<Player>>>) -> impl Responder {
-    let player = player.lock().unwrap();
+async fn get_playlists(
+    State(server_state): State<ServerState>,
+) -> Json<Vec<PlaylistInfo>> {
+    let player = server_state.player.lock().await;
     let playlists: Vec<PlaylistInfo> = player.library.playlists
         .iter()
         .enumerate()
@@ -110,47 +110,94 @@ async fn get_playlists(player: web::Data<Arc<Mutex<Player>>>) -> impl Responder 
             index,
         })
         .collect();
-    HttpResponse::Ok().json(playlists)
+    Json(playlists)
+}
+
+async fn get_state(
+    State(server_state): State<ServerState>,
+) -> Json<PlayerState> {
+    let player = server_state.player.lock().await;
+    Json(player.state.clone())
 }
 
 async fn play_stream(
-    player: web::Data<Arc<Mutex<Player>>>,
-    index: web::Path<usize>,
-) -> impl Responder {
-    let mut player = player.lock().unwrap();
-    player.play_stream(*index as u8);
-    HttpResponse::Ok().finish()
+    Path(index): Path<u64>,
+    State(server_state): State<ServerState>,
+) -> Result<StatusCode, StatusCode> {
+    let mut player = server_state.player.lock().await;
+    player.play_stream(index as u8);
+    Ok(StatusCode::OK)
 }
 
 async fn play_playlist(
-    player: web::Data<Arc<Mutex<Player>>>,
-    index: web::Path<usize>,
-) -> impl Responder {
-    let mut player = player.lock().unwrap();
-    player.play_playlist(*index as u8);
-    HttpResponse::Ok().finish()
+    State(server_state): State<ServerState>,
+    Path(index): Path<u64>,
+) -> Result<StatusCode, StatusCode> {
+    let mut player = server_state.player.lock().await;
+    player.play_playlist(index as u8);
+    Ok(StatusCode::OK)
 }
 
-async fn play_pause(player: web::Data<Arc<Mutex<Player>>>) -> impl Responder {
-    let mut player = player.lock().unwrap();
+async fn play_pause(
+    State(server_state): State<ServerState>,
+) -> Result<StatusCode, StatusCode> {
+    let mut player = server_state.player.lock().await;
     player.play_pause();
-    HttpResponse::Ok().finish()
+    Ok(StatusCode::OK)
 }
 
-async fn stop(player: web::Data<Arc<Mutex<Player>>>) -> impl Responder {
-    let mut player = player.lock().unwrap();
+async fn stop(
+    State(server_state): State<ServerState>,
+) -> Result<StatusCode, StatusCode> {
+    let mut player = server_state.player.lock().await;
     player.stop();
-    HttpResponse::Ok().finish()
+    Ok(StatusCode::OK)
 }
 
-async fn next_track(player: web::Data<Arc<Mutex<Player>>>) -> impl Responder {
-    let mut player = player.lock().unwrap();
+async fn next_track(
+    State(server_state): State<ServerState>,
+) -> Result<StatusCode, StatusCode> {
+    let mut player = server_state.player.lock().await;
     player.play_next_track();
-    HttpResponse::Ok().finish()
+    Ok(StatusCode::OK)
 }
 
-async fn previous_track(player: web::Data<Arc<Mutex<Player>>>) -> impl Responder {
-    let mut player = player.lock().unwrap();
+async fn previous_track(
+    State(server_state): State<ServerState>,
+) -> Result<StatusCode, StatusCode> {
+    let mut player = server_state.player.lock().await;
     player.play_previous_track();
-    HttpResponse::Ok().finish()
-} 
+    Ok(StatusCode::OK)
+}
+
+pub async fn start_server(
+    player_arc: Arc<Mutex<Player>>,
+    address: String,
+) -> Result<(), Box<dyn Error>> {
+    let static_path = get_static_path();
+
+    let api_routes = Router::new()
+        .route("/streams", get(get_streams))
+        .route("/stream-logo/{name}", get(get_stream_logo))
+        .route("/playlists", get(get_playlists))
+        .route("/play/stream/{index}", post(play_stream))
+        .route("/play/playlist/{index}", post(play_playlist))
+        .route("/play/pause", post(play_pause))
+        .route("/stop", post(stop))
+        .route("/next", post(next_track))
+        .route("/previous", post(previous_track))
+        .route("/notifications", get(sse_handler))
+        .route("/state", get(get_state))
+        .with_state(ServerState {
+            player: player_arc,
+        });
+
+    let app = Router::new()
+        .nest("/api", api_routes)
+        .fallback_service(ServeDir::new(static_path));
+
+    println!("Starting HTTP server on http://{}", address);
+    let listener = tokio::net::TcpListener::bind(address).await?;
+    axum::serve(listener, app).await?;
+    Ok(())
+}

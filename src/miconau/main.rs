@@ -9,27 +9,20 @@ use args::get_args;
 use library::Library;
 use midi_listener::listen;
 use player::Player;
+use tokio::sync::Mutex;
 use std::error::Error;
 use std::process::exit;
-use std::sync::{mpsc, Arc, Mutex};
+use std::sync::{mpsc, Arc};
 use std::thread::{self, park};
 use utils::*;
 use signal_hook::{consts::SIGINT, consts::SIGTERM, iterator::Signals};
-use actix_rt;
 
 pub enum MainThreadEvent {
     MIDIEvent(u8),
 }
 
-fn main() {
-    match run() {
-        Ok(_) => (),
-        Err(err) => println!("Error: {}", err),
-    }
-}
-
-
-fn run() -> Result<(), Box<dyn Error>> {
+#[tokio::main]
+async fn main() -> Result<(), Box<dyn Error>> {
     let args = get_args();
     let main_thread = thread::current();
 
@@ -44,20 +37,11 @@ fn run() -> Result<(), Box<dyn Error>> {
         println!("Starting webserver on {}", address);
         // Start web server in a separate thread
         let player_for_web = player.clone();
-        let player_for_web_error_handler = player.clone();
-        let main_thread_for_web_error_handler = main_thread.clone();
-        std::thread::spawn(move || {
-            let web_server = web::WebServer::new(player_for_web, address);
-            actix_rt::System::new().block_on(async move {
-                if let Err(e) = web_server.start().await {
-                    eprintln!("Web server error: {}", e);
-                    player_for_web_error_handler.lock().unwrap().destroy().unwrap();
-                    main_thread_for_web_error_handler.unpark();
-                    println!("Exiting...");
-                    exit(0);
-                }
-            });
-        });
+
+        web::start_server(
+            player_for_web,
+            address,
+        ).await?;
     } else {
         println!("Web server disabled");
     }
@@ -74,11 +58,11 @@ fn run() -> Result<(), Box<dyn Error>> {
     let mut signals = Signals::new([SIGINT, SIGTERM])?;
     let player_for_interrupt_thread = player.clone();
 
-    thread::spawn(move || {
+    thread::spawn(async move || {
         for sig in signals.forever() {
             println!("Received signal {:?}", sig);
             let mut player
-                = player_for_interrupt_thread.lock().unwrap();
+                = player_for_interrupt_thread.lock().await;
             player.destroy().unwrap();
             main_thread.unpark();
             println!("Exiting...");
@@ -97,12 +81,12 @@ fn run() -> Result<(), Box<dyn Error>> {
             match rx.recv() {
                 Ok(MainThreadEvent::MIDIEvent(received)) => {
                     println!("MIDI key pressed: {}", received);
-                    let mut player = player.lock().unwrap();
+                    let mut player = player.lock().await;
                     handle_midi_key_press(received, args.start_octave, &mut player);
                 }
                 Err(error) => {
                     println!("{:?}", error);
-                    let mut player = player.lock().unwrap();
+                    let mut player = player.lock().await;
                     player.destroy().unwrap();
                     exit(1);
                 }

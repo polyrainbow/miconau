@@ -34,21 +34,21 @@ pub fn launch_mpv(output_device: Option<String>) -> Child {
 
   let stdout = process.stdout.take().unwrap();
 
-    let thread = thread::spawn(move || {
-        let reader = BufReader::new(stdout);
-        /* it waits for new output */
-        for line in reader.lines() {
-            let output = line.unwrap();
-            println!("MPV: {}", output);
-            if output.contains("Done loading scripts.") {
-              println!("MPV process created");
-              break;
-            }
-        }
-    });
+  let thread = thread::spawn(move || {
+      let reader = BufReader::new(stdout);
+      /* it waits for new output */
+      for line in reader.lines() {
+          let output = line.unwrap();
+          println!("MPV: {}", output);
+          if output.contains("Done loading scripts.") {
+            println!("MPV process created");
+            break;
+          }
+      }
+  });
 
-    thread.join().unwrap();
-    process
+  thread.join().unwrap();
+  process
 }
 
 pub fn terminate(process: &mut Child) -> std::io::Result<()> {
