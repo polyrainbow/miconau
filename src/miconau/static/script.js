@@ -64,8 +64,8 @@ function renderState(state) {
   const symbol = state.mode === "Stopped"
     ? "⏹"
     : (state.mode === "Playing"
-      ? "⏵"
-      : "⏸");
+      ? "▶️"
+      : "⏸️");
 
   let statusText = `${symbol}`;
 
