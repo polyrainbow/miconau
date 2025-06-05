@@ -70,7 +70,9 @@ function renderState(state) {
   let statusText = `${symbol}`;
 
   if (state.mode === "Playing" || state.mode === "Paused") {
-    statusText += ` ${state.source_name}`;
+    if (typeof state.source_name === "string") {
+      statusText += ` ${state.source_name}`;
+    }
   } else {
     statusText += ` Stopped`;
   }
