@@ -1,6 +1,7 @@
-use axum::{extract::{Path, State}, http::{header, HeaderMap, StatusCode}, response::{sse::{Event, KeepAlive}, Sse}, routing::{get, post}, Json, Router};
+use axum::{extract::{Path, Request, State}, http::{header, HeaderMap, StatusCode}, middleware::{self, Next}, response::{sse::{Event, KeepAlive}, Response, Sse}, routing::{get, post}, Json, Router};
 use serde::{Serialize};
 use tokio::sync::Mutex;
+use tower::ServiceBuilder;
 use tower_http::services::ServeDir;
 use std::{env::current_exe, path::PathBuf, sync::{Arc}};
 use crate::{library::Stream as AudioStream, player::{Player, PlayerState}};
@@ -170,6 +171,18 @@ async fn previous_track(
     Ok(StatusCode::OK)
 }
 
+
+async fn disable_browser_cache(request: Request, next: Next) -> Response {
+    let mut response = next.run(request).await;
+    response.headers_mut().insert(
+        "Cache-Control",
+        "no-cache, no-store, must-revalidate".parse().unwrap(),
+    );
+    response.headers_mut().insert("Pragma", "no-cache".parse().unwrap());
+    response.headers_mut().insert("Expires", "0".parse().unwrap());
+    response
+}
+
 pub async fn start_server(
     player_arc: Arc<Mutex<Player>>,
     address: String,
@@ -192,9 +205,13 @@ pub async fn start_server(
             player: player_arc,
         });
 
+    let static_service = ServiceBuilder::new()
+        .layer(middleware::from_fn(disable_browser_cache))
+        .service(ServeDir::new(static_path));
+
     let app = Router::new()
         .nest("/api", api_routes)
-        .fallback_service(ServeDir::new(static_path));
+        .fallback_service(static_service);
 
     println!("Starting HTTP server on http://{}", address);
     let listener = tokio::net::TcpListener::bind(address).await?;
