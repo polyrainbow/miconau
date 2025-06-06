@@ -4,7 +4,7 @@ async function loadStreams() {
     const streams = await response.json();
     const streamsContainer = document.getElementById('streams');
     streamsContainer.innerHTML = streams.map(stream => `
-            <div class="stream-item" 
+            <button class="stream-item" 
                  onclick="playStream(${stream.index})"
                  data-name="${stream.name}">
                  ${stream.logo_svg
@@ -12,7 +12,7 @@ async function loadStreams() {
         : ''
       }
                 ${stream.name}
-            </div>
+            </button>
         `).join('');
   } catch (error) {
     console.error('Error loading streams:', error);
@@ -25,11 +25,11 @@ async function loadPlaylists() {
     const playlists = await response.json();
     const playlistsContainer = document.getElementById('playlists');
     playlistsContainer.innerHTML = playlists.map(playlist => `
-            <div class="playlist-item" 
+            <button class="playlist-item" 
                  onclick="playPlaylist(${playlist.index})"
                  data-name="${playlist.name}">
                 ${playlist.name}
-            </div>
+            </button>
         `).join('');
   } catch (error) {
     console.error('Error loading playlists:', error);
