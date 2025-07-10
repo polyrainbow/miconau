@@ -41,11 +41,11 @@ pub struct Player {
 }
 
 impl Player {
-    pub fn new(
+    pub async fn new(
         library: Library,
         output_device_name: Option<String>,
     ) -> Player {
-        let mpv_process = launch_mpv(output_device_name);
+        let mpv_process = launch_mpv(output_device_name).await;
         println!("MPV process initialized");
 
         let mpv_controller = Mpv::connect(MPV_SOCKET_PATH).unwrap();

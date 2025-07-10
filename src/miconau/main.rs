@@ -9,6 +9,7 @@ use args::get_args;
 use library::Library;
 use midi_listener::listen;
 use player::Player;
+use tokio::spawn;
 use tokio::sync::Mutex;
 use std::error::Error;
 use std::process::exit;
@@ -27,9 +28,16 @@ async fn main() -> Result<(), Box<dyn Error>> {
     let main_thread = thread::current();
 
     let library = Library::new(args.library_folder);
-    let (main_thread_sender, rx) = mpsc::channel::<MainThreadEvent>();
+    let (
+        main_thread_sender,
+        rx
+    ) = mpsc::channel::<MainThreadEvent>();
 
-    let player = Arc::new(Mutex::new(Player::new(library, args.output_device)));
+    let player = Arc::new(
+        Mutex::new(
+            Player::new(library, args.output_device).await
+        )
+    );
     println!("Player module initialized");
 
     if args.address.is_some() {
@@ -38,10 +46,12 @@ async fn main() -> Result<(), Box<dyn Error>> {
         // Start web server in a separate thread
         let player_for_web = player.clone();
 
-        web::start_server(
-            player_for_web,
-            address,
-        ).await?;
+        spawn(async move {
+            let _ = web::start_server(
+                player_for_web,
+                address,
+            ).await;
+        });
     } else {
         println!("Web server disabled");
     }
@@ -58,7 +68,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
     let mut signals = Signals::new([SIGINT, SIGTERM])?;
     let player_for_interrupt_thread = player.clone();
 
-    thread::spawn(async move || {
+    spawn(async move {
         for sig in signals.forever() {
             println!("Received signal {:?}", sig);
             let mut player
