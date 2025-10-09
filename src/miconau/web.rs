@@ -25,6 +25,12 @@ struct PlaylistInfo {
     index: usize,
 }
 
+#[derive(Serialize)]
+struct TrackInfo {
+    title: String,
+    index: usize,
+}
+
 #[derive(Clone)]
 struct ServerState {
     player: Arc<Mutex<Player>>,
@@ -114,6 +120,32 @@ async fn get_playlists(
     Json(playlists)
 }
 
+async fn get_playlist_tracks(
+    State(server_state): State<ServerState>,
+    Path(index): Path<usize>,
+) -> Result<Json<Vec<TrackInfo>>, StatusCode> {
+    let player = server_state.player.lock().await;
+    if index >= player.library.playlists.len() {
+        return Err(StatusCode::NOT_FOUND);
+    }
+    let playlist = &player.library.playlists[index];
+    let tracks: Vec<TrackInfo> = playlist.tracks
+        .iter()
+        .enumerate()
+        .map(|(track_index, track)| {
+            let title = track.filename
+                .file_stem()
+                .map(|s| s.to_string_lossy().to_string())
+                .unwrap_or_else(|| "Unknown".to_string());
+            TrackInfo {
+                title,
+                index: track_index,
+            }
+        })
+        .collect();
+    Ok(Json(tracks))
+}
+
 async fn get_state(
     State(server_state): State<ServerState>,
 ) -> Json<PlayerState> {
@@ -193,6 +225,7 @@ pub async fn start_server(
         .route("/streams", get(get_streams))
         .route("/stream-logo/{name}", get(get_stream_logo))
         .route("/playlists", get(get_playlists))
+        .route("/playlist/{index}/tracks", get(get_playlist_tracks))
         .route("/play/stream/{index}", post(play_stream))
         .route("/play/playlist/{index}", post(play_playlist))
         .route("/play/pause", post(play_pause))

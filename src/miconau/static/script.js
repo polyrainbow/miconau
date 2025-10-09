@@ -24,16 +24,73 @@ async function loadPlaylists() {
     const response = await fetch('/api/playlists');
     const playlists = await response.json();
     const playlistsContainer = document.getElementById('playlists');
-    playlistsContainer.innerHTML = playlists.map(playlist => `
-            <button class="playlist-item" 
-                 onclick="playPlaylist(${playlist.index})"
-                 data-name="${playlist.name}">
-                ${playlist.name}
-            </button>
-        `).join('');
+    playlistsContainer.innerHTML = '';
+
+    for (const playlist of playlists) {
+      const details = document.createElement('details');
+      details.className = 'playlist';
+
+      const summary = document.createElement('summary');
+      summary.className = 'playlist-summary';
+      
+      const titleSpan = document.createElement('span');
+      titleSpan.textContent = playlist.name;
+      titleSpan.className = 'playlist-title';
+      
+      const playBtn = document.createElement('button');
+      playBtn.textContent = 'Play';
+      playBtn.className = 'playlist-play-button';
+      playBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        e.preventDefault();
+        playPlaylist(playlist.index);
+      });
+      
+      summary.appendChild(titleSpan);
+      summary.appendChild(playBtn);
+      details.appendChild(summary);
+
+      const trackList = document.createElement('ul');
+      trackList.className = 'track-list';
+      trackList.innerHTML = '<li>Loading...</li>';
+      details.appendChild(trackList);
+
+      // Lazy load tracks when opening
+      details.addEventListener('toggle', async () => {
+        if (details.open && !details.dataset.loaded) {
+          try {
+            const trackResponse = await fetch(`/api/playlist/${playlist.index}/tracks`);
+            if (!trackResponse.ok) throw new Error('Failed to load tracks');
+            const tracks = await trackResponse.json();
+            if (tracks.length === 0) {
+              trackList.innerHTML = '<li><em>No tracks</em></li>';
+            } else {
+              trackList.innerHTML = tracks.map(track => 
+                `<li>${escapeHtml(track.title)}</li>`
+              ).join('');
+            }
+            details.dataset.loaded = 'true';
+          } catch (err) {
+            console.error('Error loading tracks:', err);
+            trackList.innerHTML = '<li><em>Error loading tracks</em></li>';
+          }
+        }
+      });
+
+      playlistsContainer.appendChild(details);
+    }
   } catch (error) {
     console.error('Error loading playlists:', error);
   }
+}
+
+function escapeHtml(str) {
+  return str
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#039;');
 }
 
 async function playStream(index) {
