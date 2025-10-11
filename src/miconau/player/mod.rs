@@ -126,6 +126,49 @@ impl Player {
         }
     }
 
+    pub fn play_playlist_track(
+        &mut self,
+        playlist_index: u8,
+        track_index: u8,
+    ) {
+        if playlist_index < self.library.playlists.len() as u8 {
+            let playlist = self.library.playlists
+                .get(playlist_index as usize).unwrap();
+            let title = &playlist.title;
+            let track_path = &playlist.tracks
+                .get(track_index as usize).unwrap().filename;
+            println!("Playing track {}", track_path.clone().to_string_lossy());
+            self.mpv_controller.run_command(
+                MpvCommand::LoadFile {
+                    file: track_path.to_string_lossy().to_string(),
+                    option: PlaylistAddOptions::Replace,
+                }
+            ).unwrap();
+
+            self.mpv_controller.set_property(
+                "loop-playlist",
+                String::from("no"),
+            ).unwrap();
+
+            self.mpv_controller.set_property("pause", false)
+                .expect("Error setting pause property to false");
+
+            self.set_state(PlayerState {
+                source_type: Some(SourceType::Playlist),
+                source_name: Some(title.clone()),
+                mode: PlayerMode::Playing,
+            });
+        } else {
+            println!("Playlist with index {} not found. Playing error sound.", playlist_index);
+            self.play_error();
+            self.set_state(PlayerState {
+                source_type: None,
+                source_name: None,
+                mode: PlayerMode::Stopped,
+            });
+        }
+    }
+
     pub fn play_stream(&mut self, stream_index: u8) {
         if stream_index < self.library.streams.len() as u8 {
             let stream = self.library.streams.get(stream_index as usize).unwrap();

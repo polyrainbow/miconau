@@ -171,6 +171,15 @@ async fn play_playlist(
     Ok(StatusCode::OK)
 }
 
+async fn play_playlist_track(
+    State(server_state): State<ServerState>,
+    Path((index, track_index)): Path<(u64, u64)>,
+) -> Result<StatusCode, StatusCode> {
+    let mut player = server_state.player.lock().await;
+    player.play_playlist_track(index as u8, track_index as u8);
+    Ok(StatusCode::OK)
+}
+
 async fn play_pause(
     State(server_state): State<ServerState>,
 ) -> Result<StatusCode, StatusCode> {
@@ -228,6 +237,7 @@ pub async fn start_server(
         .route("/playlist/{index}/tracks", get(get_playlist_tracks))
         .route("/play/stream/{index}", post(play_stream))
         .route("/play/playlist/{index}", post(play_playlist))
+        .route("/play/playlist/{index}/{track_index}", post(play_playlist_track))
         .route("/play/pause", post(play_pause))
         .route("/stop", post(stop))
         .route("/next", post(next_track))

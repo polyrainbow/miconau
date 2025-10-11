@@ -66,7 +66,9 @@ async function loadPlaylists() {
               trackList.innerHTML = '<li><em>No tracks</em></li>';
             } else {
               trackList.innerHTML = tracks.map(track => 
-                `<li>${escapeHtml(track.title)}</li>`
+                `<li>${escapeHtml(track.title)}
+                  <button class="track-play-button" onclick="playPlaylistTrack(${playlist.index}, ${track.index})">Play</button>
+                </li>`
               ).join('');
             }
             details.dataset.loaded = 'true';
@@ -99,6 +101,13 @@ async function playStream(index) {
 
 async function playPlaylist(index) {
   await fetch(`/api/play/playlist/${index}`, { method: 'POST' });
+}
+
+async function playPlaylistTrack(playlistIndex, trackIndex) {
+  await fetch(
+    `/api/play/playlist/${playlistIndex}/${trackIndex}`,
+    { method: 'POST' },
+  );
 }
 
 async function playPause() {
