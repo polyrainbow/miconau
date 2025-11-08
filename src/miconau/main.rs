@@ -35,7 +35,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
 
     let player = Arc::new(
         Mutex::new(
-            Player::new(library, args.output_device).await
+            Player::new(library, args.output_device, args.mpv_socket).await
         )
     );
     println!("Player module initialized");

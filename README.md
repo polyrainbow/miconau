@@ -9,7 +9,7 @@ Make sure mpv is installed and in PATH. Windows is not supported.
 Make sure, `error.wav` is in the same folder as the executable `miconau`.
 
 ```
-cargo run --bin miconau -- --library-folder [PATH_TO_LIBRARY] --midi-device-index [MIDI_INPUT_DEVICE_INDEX] --start-octave [START_OCTAVE] --output-device [AUDIO_OUTPUT_DEVICE]
+cargo run --bin miconau -- --library-folder [PATH_TO_LIBRARY] --midi-device-index [MIDI_INPUT_DEVICE_INDEX] --start-octave [START_OCTAVE] --output-device [AUDIO_OUTPUT_DEVICE] --mpv-socket [MPV_SOCKET_PATH]
 ```
 Example: 
 ```

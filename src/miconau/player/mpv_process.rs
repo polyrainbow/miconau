@@ -3,15 +3,18 @@ use std::process::{Child, Command, Stdio};
 use std::io::BufRead;
 
 
-pub async fn launch_mpv(output_device: Option<String>) -> Child {
+pub async fn launch_mpv(output_device: Option<String>, socket_path: String) -> Child {
   let mut args = vec![
     "-v".to_string(),
     "--idle".to_string(),
     "--no-video".to_string(),
     "--no-input-default-bindings".to_string(),
     "--no-config".to_string(),
-    "--input-ipc-server=/tmp/mpvsocket".to_string()
   ];
+  
+  let mut socket_arg = "--input-ipc-server=".to_owned();
+  socket_arg.push_str(&socket_path);
+  args.push(socket_arg);
 
   if output_device.is_some() {
     let output_device_str = output_device.unwrap();

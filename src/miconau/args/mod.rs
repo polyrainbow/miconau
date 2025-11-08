@@ -18,6 +18,9 @@ pub struct Args {
 
     #[arg(short, long)]
     pub address: Option<String>,
+
+    #[arg(long, default_value = "/tmp/mpvsocket")]
+    pub mpv_socket: String,
 }
 
 pub fn get_args() -> Args {

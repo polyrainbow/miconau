@@ -10,8 +10,6 @@ use std::ops::Deref;
 use std::process::Child;
 use serde::Serialize;
 
-static MPV_SOCKET_PATH: &str = "/tmp/mpvsocket";
-
 #[derive(Serialize, Copy, Clone, Debug)]
 enum PlayerMode {
     Paused,
@@ -38,17 +36,19 @@ pub struct Player {
     pub state: PlayerState,
     pub state_transmitter: broadcast::Sender<PlayerState>,
     _state_receiver: broadcast::Receiver<PlayerState>,
+    socket_path: String,
 }
 
 impl Player {
     pub async fn new(
         library: Library,
         output_device_name: Option<String>,
+        socket_path: String,
     ) -> Player {
-        let mpv_process = launch_mpv(output_device_name).await;
+        let mpv_process = launch_mpv(output_device_name, socket_path.clone()).await;
         println!("MPV process initialized");
 
-        let mpv_controller = Mpv::connect(MPV_SOCKET_PATH).unwrap();
+        let mpv_controller = Mpv::connect(&socket_path).unwrap();
         mpv_controller.set_volume(
             100.0,
             NumberChangeOptions::Absolute,
@@ -69,6 +69,7 @@ impl Player {
             state: initial_state,
             state_transmitter,
             _state_receiver, // we need to keep the receiver to avoid dropping the channel
+            socket_path,
         };
     }
 
