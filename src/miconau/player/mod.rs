@@ -36,7 +36,6 @@ pub struct Player {
     pub state: PlayerState,
     pub state_transmitter: broadcast::Sender<PlayerState>,
     _state_receiver: broadcast::Receiver<PlayerState>,
-    socket_path: String,
 }
 
 impl Player {
@@ -69,7 +68,6 @@ impl Player {
             state: initial_state,
             state_transmitter,
             _state_receiver, // we need to keep the receiver to avoid dropping the channel
-            socket_path,
         };
     }
 
