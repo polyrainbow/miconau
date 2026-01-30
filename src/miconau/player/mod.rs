@@ -72,7 +72,7 @@ impl Player {
             NumberChangeOptions::Absolute,
         ).unwrap();
 
-        let (event_transmitter, _event_receiver) = broadcast::channel(1);
+        let (event_transmitter, _event_receiver) = broadcast::channel(16);
 
         let initial_state = PlayerState {
             source_type: None,
@@ -410,11 +410,19 @@ impl Player {
     }
 
     /// Called when mpv advances to the next track in its playlist.
-    /// Syncs the Rust queue by removing the first item if the queue is non-empty.
-    pub fn on_track_advanced(&mut self) {
-        if !self.queue.is_empty() {
+    /// Syncs the Rust queue by removing the first item if the queue is non-empty
+    /// and we're past the first track in mpv's playlist.
+    pub fn on_track_started(&mut self) {
+        // Check if we have queue items and we're playing a queued track
+        // mpv's playlist-pos > 0 means we've advanced beyond the first track
+        let playlist_pos: usize = self.mpv_controller
+            .get_property("playlist-pos")
+            .unwrap_or(0);
+        
+        if !self.queue.is_empty() && playlist_pos > 0 {
+            // We're playing a track from the queue
             let item = self.queue.remove(0);
-            println!("Track advanced, removing from queue: {}", item.track_title);
+            println!("Playing queued track: {} - {}", item.playlist_name, item.track_title);
             
             // Update state to show the new track
             self.set_state(PlayerState {
@@ -448,11 +456,20 @@ pub fn spawn_mpv_event_listener(
         
         loop {
             match event_mpv.event_listen() {
-                Ok(Event::EndFile) => {
-                    println!("MPV: EndFile event received");
-                    // Use blocking lock since we're in a std::thread
-                    if let Ok(mut player) = player.try_lock() {
-                        player.on_track_advanced();
+                Ok(Event::StartFile) => {
+                    println!("MPV: StartFile event received");
+                    // A new file started - sync queue and update status
+                    // Use a blocking approach with retry
+                    loop {
+                        match player.try_lock() {
+                            Ok(mut player_guard) => {
+                                player_guard.on_track_started();
+                                break;
+                            }
+                            Err(_) => {
+                                std::thread::sleep(std::time::Duration::from_millis(10));
+                            }
+                        }
                     }
                 }
                 Ok(Event::Idle) => {
