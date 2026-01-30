@@ -95,22 +95,28 @@ h1 {
     font-size: 16px;
 }
 
-/* New playlist details/summary styling */
-details.playlist {
+/* Accessible playlist styling */
+.playlist {
+    display: flex;
+    align-items: stretch;
     margin-bottom: 0.5rem;
     border: 1px solid light-dark(#ddd, #555);
     border-radius: 5px;
-    padding: 0;
     background: light-dark(#fafafa, #2a2a2a);
+    overflow: hidden;
 }
 
-details.playlist[open] {
+.playlist-details {
+    flex-grow: 1;
+    min-width: 0;
+}
+
+.playlist-details[open] {
     background: light-dark(#f0f8ff, #1a2a3a);
 }
 
 .playlist-summary {
     display: flex;
-    justify-content: space-between;
     align-items: center;
     cursor: pointer;
     font-weight: 600;
@@ -120,31 +126,43 @@ details.playlist[open] {
 
 .playlist-title {
     flex-grow: 1;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
 }
 
 .playlist-play-button {
-    margin-left: 1rem;
-    font-size: 0.8rem;
-    padding: 0.4rem 0.8rem;
+    flex-shrink: 0;
+    font-size: 0.85rem;
+    padding: 0 1rem;
     cursor: pointer;
     background-color: #4CAF50;
     color: white;
     border: none;
-    border-radius: 3px;
+    border-left: 1px solid light-dark(#ddd, #555);
+    align-self: stretch;
 }
 
 .playlist-play-button:hover {
     background-color: #45a049;
 }
 
+.playlist-play-button:focus {
+    outline: 2px solid #4CAF50;
+    outline-offset: -2px;
+}
+
 .track-list {
     list-style: disc inside;
     margin: 0 0 0.5rem 0;
-    padding: 0 1rem 0.5rem 2rem;
-    max-height: 300px;
-    overflow-y: auto;
+    padding: 0 1.5rem 0.5rem 1.5rem;
     font-size: 0.9rem;
     color: light-dark(#333, #ccc);
+
+    li {
+        padding: 0.2em 0em;
+        list-style: none;
+    }
 }
 .active {
     background-color: #e6f7ff;
@@ -254,15 +272,27 @@ details.playlist[open] {
     margin: 0;
 }
 
+.track-play-button,
 .track-queue-button {
     margin-left: 0.5rem;
     font-size: 0.8rem;
     padding: 0.4rem 0.8rem;
     cursor: pointer;
-    background-color: #17a2b8;
     color: white;
     border: none;
     border-radius: 3px;
+}
+
+.track-play-button {
+    background-color: #4CAF50;
+}
+
+.track-play-button:hover {
+    background-color: #45a049;
+}
+
+.track-queue-button {
+    background-color: #17a2b8;
 }
 
 .track-queue-button:hover {

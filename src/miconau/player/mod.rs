@@ -1,7 +1,7 @@
 mod mpv_process;
 
 use mpv_process::*;
-use mpvipc::{Mpv, MpvCommand, NumberChangeOptions, PlaylistAddOptions};
+use mpvipc::{Event, Mpv, MpvCommand, NumberChangeOptions, PlaylistAddOptions};
 use tokio::sync::{broadcast};
 
 use crate::library::{Library};
@@ -303,11 +303,21 @@ impl Player {
             .file_stem()
             .map(|s| s.to_string_lossy().to_string())
             .unwrap_or_else(|| "Unknown".to_string());
-        
+        let file_path = track.filename.to_string_lossy().to_string();
+
+        // Append to mpv's internal playlist
+        self.mpv_controller.run_command(
+            MpvCommand::LoadFile {
+                file: file_path.clone(),
+                option: PlaylistAddOptions::Append,
+            }
+        ).map_err(|e| format!("Failed to append to mpv playlist: {}", e))?;
+
+        // Add to our queue for UI display
         self.queue.push(QueueItem {
             playlist_name: playlist.title.clone(),
             track_title,
-            file_path: track.filename.to_string_lossy().to_string(),
+            file_path,
         });
         self.notify_queue_updated();
         Ok(())
@@ -317,12 +327,46 @@ impl Player {
         if index >= self.queue.len() {
             return Err("Queue item not found".to_string());
         }
+        
+        // Get current playlist position to calculate the correct mpv playlist index
+        // Queue items are appended after the current playlist, so we need to offset
+        let current_pos: usize = self.mpv_controller
+            .get_property("playlist-pos")
+            .unwrap_or(0);
+        let mpv_index = current_pos + 1 + index;
+        
+        // Remove from mpv's playlist
+        let _ = self.mpv_controller.run_command_raw(
+            "playlist-remove",
+            &[&mpv_index.to_string()],
+        );
+        
         self.queue.remove(index);
         self.notify_queue_updated();
         Ok(())
     }
 
     pub fn clear_queue(&mut self) {
+        // Get current playlist position
+        let current_pos: usize = self.mpv_controller
+            .get_property("playlist-pos")
+            .unwrap_or(0);
+        
+        let playlist_count: usize = self.mpv_controller
+            .get_property("playlist-count")
+            .unwrap_or(0);
+        
+        // Remove all items after the current position from mpv's playlist
+        if playlist_count > current_pos + 1 {
+            // Remove from the end to avoid index shifting issues
+            for i in ((current_pos + 1)..playlist_count).rev() {
+                let _ = self.mpv_controller.run_command_raw(
+                    "playlist-remove",
+                    &[&i.to_string()],
+                );
+            }
+        }
+        
         self.queue.clear();
         self.notify_queue_updated();
     }
@@ -364,4 +408,70 @@ impl Player {
         self.notify_queue_updated();
         true
     }
+
+    /// Called when mpv advances to the next track in its playlist.
+    /// Syncs the Rust queue by removing the first item if the queue is non-empty.
+    pub fn on_track_advanced(&mut self) {
+        if !self.queue.is_empty() {
+            let item = self.queue.remove(0);
+            println!("Track advanced, removing from queue: {}", item.track_title);
+            
+            // Update state to show the new track
+            self.set_state(PlayerState {
+                source_type: Some(SourceType::Playlist),
+                source_name: Some(format!("{} - {}", item.playlist_name, item.track_title)),
+                mode: PlayerMode::Playing,
+            });
+            
+            self.notify_queue_updated();
+        }
+    }
+}
+
+/// Spawns a background task that listens for mpv events and syncs the queue.
+/// This should be called after creating the Player.
+pub fn spawn_mpv_event_listener(
+    socket_path: String,
+    player: std::sync::Arc<tokio::sync::Mutex<Player>>,
+) {
+    std::thread::spawn(move || {
+        // Create a separate mpv connection for event listening
+        let mut event_mpv = match Mpv::connect(&socket_path) {
+            Ok(mpv) => mpv,
+            Err(e) => {
+                eprintln!("Failed to connect event listener to mpv: {}", e);
+                return;
+            }
+        };
+        
+        println!("MPV event listener started");
+        
+        loop {
+            match event_mpv.event_listen() {
+                Ok(Event::EndFile) => {
+                    println!("MPV: EndFile event received");
+                    // Use blocking lock since we're in a std::thread
+                    if let Ok(mut player) = player.try_lock() {
+                        player.on_track_advanced();
+                    }
+                }
+                Ok(Event::Idle) => {
+                    println!("MPV: Idle event received");
+                }
+                Ok(Event::Shutdown) => {
+                    println!("MPV: Shutdown event received");
+                    break;
+                }
+                Ok(_) => {
+                    // Ignore other events
+                }
+                Err(e) => {
+                    eprintln!("MPV event listener error: {}", e);
+                    break;
+                }
+            }
+        }
+        
+        println!("MPV event listener stopped");
+    });
 }
