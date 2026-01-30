@@ -44,6 +44,22 @@
             <h2>Playlists</h2>
             <div class="playlists" id="playlists"></div>
         </div>
+
+        <div class="section upload-section">
+            <h2>Upload FLAC Files</h2>
+            <div class="upload-form">
+                <div class="form-group">
+                    <label for="playlistName">Playlist Name:</label>
+                    <input type="text" id="playlistName" placeholder="Enter playlist name" />
+                </div>
+                <div class="form-group">
+                    <label for="flacFiles">Select FLAC Files:</label>
+                    <input type="file" id="flacFiles" multiple accept=".flac" />
+                </div>
+                <button class="upload-button" onclick="uploadPlaylist()">Upload Playlist</button>
+                <div id="uploadStatus"></div>
+            </div>
+        </div>
     </div>
 </body>
 </html> 

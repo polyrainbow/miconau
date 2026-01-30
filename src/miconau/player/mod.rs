@@ -10,6 +10,15 @@ use std::ops::Deref;
 use std::process::Child;
 use serde::Serialize;
 
+#[derive(Serialize, Clone, Debug)]
+#[serde(tag = "type")]
+pub enum AppEvent {
+    #[serde(rename = "playerState")]
+    PlayerState(PlayerState),
+    #[serde(rename = "libraryUpdated")]
+    LibraryUpdated,
+}
+
 #[derive(Serialize, Copy, Clone, Debug)]
 enum PlayerMode {
     Paused,
@@ -34,8 +43,8 @@ pub struct Player {
     mpv_process: Child,
     mpv_controller: Mpv,
     pub state: PlayerState,
-    pub state_transmitter: broadcast::Sender<PlayerState>,
-    _state_receiver: broadcast::Receiver<PlayerState>,
+    pub event_transmitter: broadcast::Sender<AppEvent>,
+    _event_receiver: broadcast::Receiver<AppEvent>,
 }
 
 impl Player {
@@ -53,7 +62,7 @@ impl Player {
             NumberChangeOptions::Absolute,
         ).unwrap();
 
-        let (state_transmitter, _state_receiver) = broadcast::channel(1);
+        let (event_transmitter, _event_receiver) = broadcast::channel(1);
 
         let initial_state = PlayerState {
             source_type: None,
@@ -66,17 +75,24 @@ impl Player {
             mpv_process,
             mpv_controller,
             state: initial_state,
-            state_transmitter,
-            _state_receiver, // we need to keep the receiver to avoid dropping the channel
+            event_transmitter,
+            _event_receiver, // we need to keep the receiver to avoid dropping the channel
         };
     }
 
     fn set_state(&mut self, state: PlayerState) {
         self.state = state;
 
-        match self.state_transmitter.send(self.state.clone()) {
+        match self.event_transmitter.send(AppEvent::PlayerState(self.state.clone())) {
             Ok(_) => println!("State updated: {:?}", self.state),
             Err(e) => println!("Error sending state update: {}", e),
+        }
+    }
+
+    pub fn notify_library_updated(&self) {
+        match self.event_transmitter.send(AppEvent::LibraryUpdated) {
+            Ok(_) => println!("Library updated notification sent"),
+            Err(e) => println!("Error sending library update: {}", e),
         }
     }
 

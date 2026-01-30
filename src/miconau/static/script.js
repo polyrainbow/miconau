@@ -126,6 +126,77 @@ async function previousTrack() {
   await fetch('/api/previous', { method: 'POST' });
 }
 
+async function uploadPlaylist() {
+  const playlistName = document.getElementById('playlistName').value.trim();
+  const fileInput = document.getElementById('flacFiles');
+  const files = fileInput.files;
+  const statusDiv = document.getElementById('uploadStatus');
+  const uploadButton = document.querySelector('.upload-button');
+
+  // Validation
+  if (!playlistName) {
+    statusDiv.textContent = 'Please enter a playlist name';
+    statusDiv.className = 'error';
+    return;
+  }
+
+  if (files.length === 0) {
+    statusDiv.textContent = 'Please select at least one FLAC file';
+    statusDiv.className = 'error';
+    return;
+  }
+
+  // Check that all files are FLAC
+  for (let i = 0; i < files.length; i++) {
+    if (!files[i].name.toLowerCase().endsWith('.flac')) {
+      statusDiv.textContent = 'All files must be FLAC format';
+      statusDiv.className = 'error';
+      return;
+    }
+  }
+
+  try {
+    uploadButton.disabled = true;
+    statusDiv.textContent = 'Uploading...';
+    statusDiv.className = 'info';
+
+    // Create FormData with files and playlist name
+    const formData = new FormData();
+    formData.append('playlistName', playlistName);
+    for (let i = 0; i < files.length; i++) {
+      formData.append(`file-${i}`, files[i], files[i].name);
+    }
+
+    const response = await fetch('/api/upload-playlist', {
+      method: 'POST',
+      body: formData,
+    });
+
+    if (!response.ok) {
+      const error = await response.text();
+      throw new Error(error || `Upload failed with status ${response.status}`);
+    }
+
+    statusDiv.textContent = 'Playlist uploaded successfully!';
+    statusDiv.className = 'success';
+
+    // Clear the form
+    document.getElementById('playlistName').value = '';
+    fileInput.value = '';
+
+    // Clear status after a delay (playlists will be reloaded via SSE)
+    setTimeout(() => {
+      statusDiv.textContent = '';
+    }, 1500);
+  } catch (error) {
+    console.error('Upload error:', error);
+    statusDiv.textContent = `Error: ${error.message}`;
+    statusDiv.className = 'error';
+  } finally {
+    uploadButton.disabled = false;
+  }
+}
+
 function renderState(state) {
   const symbol = state.mode === "Stopped"
     ? "⏹"
@@ -150,8 +221,13 @@ function connectToEvents() {
   const eventSource = new EventSource('/api/notifications');
 
   eventSource.onmessage = function (event) {
-    const state = JSON.parse(event.data);
-    renderState(state);
+    const data = JSON.parse(event.data);
+    
+    if (data.type === 'playerState') {
+      renderState(data);
+    } else if (data.type === 'libraryUpdated') {
+      loadPlaylists();
+    }
   }
 };
 

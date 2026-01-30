@@ -155,4 +155,86 @@ details.playlist[open] {
     padding: 10px;
     background-color: #f8f8f8;
     border-radius: 5px;
-} 
+}
+
+/* Upload section styling */
+.upload-section {
+    border-top: 2px solid light-dark(#ddd, #555);
+    padding-top: 1.5rem;
+    margin-top: 1.5rem;
+}
+
+.upload-form {
+    display: flex;
+    flex-direction: column;
+    gap: 1rem;
+}
+
+.form-group {
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+}
+
+.form-group label {
+    font-weight: 600;
+    font-size: 0.95rem;
+}
+
+.form-group input[type="text"],
+.form-group input[type="file"] {
+    padding: 0.75rem;
+    border: 1px solid light-dark(#ddd, #555);
+    border-radius: 5px;
+    font-size: 1rem;
+    background-color: light-dark(white, #2a2a2a);
+    color: light-dark(black, white);
+    font-family: Arial, sans-serif;
+}
+
+.form-group input[type="text"]::placeholder {
+    color: light-dark(#999, #666);
+}
+
+.upload-button {
+    padding: 0.75rem 1rem;
+    font-size: 1rem;
+    cursor: pointer;
+    background-color: #4CAF50;
+    color: white;
+    border: none;
+    border-radius: 5px;
+    font-weight: 600;
+    transition: background-color 0.3s;
+}
+
+.upload-button:hover {
+    background-color: #45a049;
+}
+
+.upload-button:disabled {
+    background-color: #cccccc;
+    cursor: not-allowed;
+}
+
+#uploadStatus {
+    margin-top: 0.5rem;
+    padding: 0.75rem;
+    border-radius: 5px;
+    min-height: 1.5rem;
+}
+
+#uploadStatus.success {
+    background-color: light-dark(#d4edda, #1a3a1a);
+    color: light-dark(#155724, #90ee90);
+}
+
+#uploadStatus.error {
+    background-color: light-dark(#f8d7da, #3a1a1a);
+    color: light-dark(#721c24, #ff6b6b);
+}
+
+#uploadStatus.info {
+    background-color: light-dark(#d1ecf1, #1a2a3a);
+    color: light-dark(#0c5460, #90c8d8);
+}

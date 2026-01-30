@@ -1,16 +1,18 @@
-use axum::{extract::{Path, Request, State}, http::{header, HeaderMap, StatusCode}, middleware::{self, Next}, response::{sse::{Event, KeepAlive}, Response, Sse}, routing::{get, post}, Json, Router};
+use axum::{extract::{Path, Request, State, Multipart}, http::{header, HeaderMap, StatusCode}, middleware::{self, Next}, response::{sse::{Event, KeepAlive}, Response, Sse}, routing::{get, post}, Json, Router};
 use serde::{Serialize};
 use tokio::sync::Mutex;
 use tower::ServiceBuilder;
 use tower_http::services::ServeDir;
 use std::{env::current_exe, path::PathBuf, sync::{Arc}};
-use crate::{library::Stream as AudioStream, player::{Player, PlayerState}};
+use crate::{library::Stream as AudioStream, player::{Player, PlayerState, AppEvent}};
 use std::error::Error;
 use axum::response::IntoResponse;
 use futures_util::stream::{Stream};
 use std::convert::Infallible;
 use futures_util::stream::StreamExt;
 use tokio_stream::wrappers::BroadcastStream;
+use serde_json::json;
+use axum::extract::DefaultBodyLimit;
 
 #[derive(Serialize)]
 struct StreamInfo {
@@ -41,12 +43,12 @@ async fn sse_handler(
     State(server_state): State<ServerState>,
 ) -> Sse<impl Stream<Item = Result<Event, Infallible>>> {
     let player = server_state.player.lock().await;
-    let receiver = player.state_transmitter.subscribe();
+    let receiver = player.event_transmitter.subscribe();
     let event_stream = BroadcastStream::new(receiver)
         .filter_map(|result| async move {
             match result {
-                Ok(state) => {
-                    Some(Ok(Event::default().json_data(&state).unwrap()))
+                Ok(event) => {
+                    Some(Ok(Event::default().json_data(&event).unwrap()))
                 }
                 Err(_) => None,
             }
@@ -212,6 +214,64 @@ async fn previous_track(
     Ok(StatusCode::OK)
 }
 
+async fn upload_playlist(
+    State(server_state): State<ServerState>,
+    mut multipart: Multipart,
+) -> Result<Json<serde_json::Value>, (StatusCode, String)> {
+    let mut playlist_name = String::new();
+    let mut files: Vec<(String, Vec<u8>)> = Vec::new();
+
+    while let Some(field) = multipart.next_field().await
+        .map_err(|e| (StatusCode::BAD_REQUEST, format!("Error parsing multipart: {}", e)))? {
+        
+        let field_name = field.name().unwrap_or("").to_string();
+        
+        if field_name == "playlistName" {
+            playlist_name = field.text().await
+                .map_err(|e| (StatusCode::BAD_REQUEST, format!("Error reading playlist name: {}", e)))?;
+        } else if field_name.starts_with("file-") {
+            let file_name = field.file_name().unwrap_or("unknown").to_string();
+            let bytes = field.bytes().await
+                .map_err(|e| (StatusCode::BAD_REQUEST, format!("Error reading file: {}", e)))?;
+            files.push((file_name, bytes.to_vec()));
+        }
+    }
+
+    if playlist_name.is_empty() {
+        return Err((StatusCode::BAD_REQUEST, "Playlist name is required".to_string()));
+    }
+
+    if files.is_empty() {
+        return Err((StatusCode::BAD_REQUEST, "At least one file is required".to_string()));
+    }
+
+    // Get the library folder from the player
+    let player = server_state.player.lock().await;
+    let library_folder = player.library.folder.clone();
+    drop(player);
+
+    // Create playlist directory
+    let playlist_path = PathBuf::from(&library_folder).join(&playlist_name);
+    tokio::fs::create_dir_all(&playlist_path)
+        .await
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Error creating directory: {}", e)))?;
+
+    // Write files to the playlist directory
+    for (filename, data) in files {
+        let file_path = playlist_path.join(&filename);
+        tokio::fs::write(&file_path, data)
+            .await
+            .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Error writing file: {}", e)))?;
+    }
+
+    // Reload library
+    let mut player = server_state.player.lock().await;
+    player.library = crate::library::Library::new(library_folder);
+    player.notify_library_updated();
+
+    Ok(Json(json!({"success": true})))
+}
+
 
 async fn disable_browser_cache(request: Request, next: Next) -> Response {
     let mut response = next.run(request).await;
@@ -242,8 +302,10 @@ pub async fn start_server(
         .route("/stop", post(stop))
         .route("/next", post(next_track))
         .route("/previous", post(previous_track))
+        .route("/upload-playlist", post(upload_playlist))
         .route("/notifications", get(sse_handler))
         .route("/state", get(get_state))
+        .layer(DefaultBodyLimit::max(512 * 1024 * 1024))
         .with_state(ServerState {
             player: player_arc,
         });
