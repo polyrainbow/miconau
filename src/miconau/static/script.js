@@ -68,6 +68,7 @@ async function loadPlaylists() {
               trackList.innerHTML = tracks.map(track => 
                 `<li>${escapeHtml(track.title)}
                   <button class="track-play-button" onclick="playPlaylistTrack(${playlist.index}, ${track.index})">Play</button>
+                  <button class="track-queue-button" onclick="addToQueue(${playlist.index}, ${track.index})">Queue</button>
                 </li>`
               ).join('');
             }
@@ -124,6 +125,77 @@ async function nextTrack() {
 
 async function previousTrack() {
   await fetch('/api/previous', { method: 'POST' });
+}
+
+async function loadQueue() {
+  try {
+    const response = await fetch('/api/queue');
+    const queue = await response.json();
+    renderQueue(queue);
+  } catch (error) {
+    console.error('Error loading queue:', error);
+  }
+}
+
+function renderQueue(queue) {
+  const queueList = document.getElementById('queue');
+  const queueEmpty = document.getElementById('queueEmpty');
+  const clearBtn = document.getElementById('clearQueueBtn');
+
+  if (queue.length === 0) {
+    queueList.innerHTML = '';
+    queueEmpty.style.display = 'block';
+    clearBtn.style.display = 'none';
+  } else {
+    queueEmpty.style.display = 'none';
+    clearBtn.style.display = 'inline-block';
+    queueList.innerHTML = queue.map((item, index) => `
+      <li class="queue-item">
+        <span class="queue-item-position">${index + 1}.</span>
+        <div class="queue-item-info">
+          <span class="queue-item-title">${escapeHtml(item.track_title)}</span>
+          <span class="queue-item-playlist">${escapeHtml(item.playlist_name)}</span>
+        </div>
+        <button class="queue-remove-button" onclick="removeFromQueue(${index})">Remove</button>
+      </li>
+    `).join('');
+  }
+}
+
+async function addToQueue(playlistIndex, trackIndex) {
+  try {
+    const response = await fetch('/api/queue/add', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ playlist_index: playlistIndex, track_index: trackIndex }),
+    });
+    if (!response.ok) {
+      const error = await response.text();
+      console.error('Error adding to queue:', error);
+    }
+  } catch (error) {
+    console.error('Error adding to queue:', error);
+  }
+}
+
+async function removeFromQueue(index) {
+  try {
+    const response = await fetch(`/api/queue/remove/${index}`, { method: 'POST' });
+    if (!response.ok) {
+      const error = await response.text();
+      console.error('Error removing from queue:', error);
+    }
+  } catch (error) {
+    console.error('Error removing from queue:', error);
+  }
+}
+
+async function clearQueue() {
+  try {
+    await fetch('/api/queue/clear', { method: 'POST' });
+  } catch (error) {
+    console.error('Error clearing queue:', error);
+  }
 }
 
 async function uploadPlaylist() {
@@ -227,6 +299,8 @@ function connectToEvents() {
       renderState(data);
     } else if (data.type === 'libraryUpdated') {
       loadPlaylists();
+    } else if (data.type === 'queueUpdated') {
+      renderQueue(data.queue);
     }
   }
 };
@@ -235,6 +309,7 @@ function connectToEvents() {
 document.addEventListener('DOMContentLoaded', () => {
   loadStreams();
   loadPlaylists();
+  loadQueue();
   connectToEvents();
   fetch('/api/state')
     .then(response => response.json())

@@ -164,6 +164,111 @@ details.playlist[open] {
     margin-top: 1.5rem;
 }
 
+/* Queue section styling */
+.queue-section {
+    border: 1px solid light-dark(#ddd, #555);
+    border-radius: 5px;
+    padding: 1rem;
+    background: light-dark(#f9f9f9, #1a1a1a);
+}
+
+.queue-container {
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+}
+
+.queue-list {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+}
+
+.queue-item {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 0.75rem;
+    background: light-dark(white, #2a2a2a);
+    border: 1px solid light-dark(#ddd, #555);
+    border-radius: 5px;
+}
+
+.queue-item-info {
+    display: flex;
+    flex-direction: column;
+    gap: 0.2rem;
+}
+
+.queue-item-title {
+    font-weight: 600;
+    font-size: 0.95rem;
+}
+
+.queue-item-playlist {
+    font-size: 0.8rem;
+    color: light-dark(#666, #999);
+}
+
+.queue-item-position {
+    font-size: 0.8rem;
+    color: light-dark(#999, #666);
+    margin-right: 0.75rem;
+}
+
+.queue-remove-button {
+    padding: 0.4rem 0.8rem;
+    font-size: 0.8rem;
+    cursor: pointer;
+    background-color: #dc3545;
+    color: white;
+    border: none;
+    border-radius: 3px;
+}
+
+.queue-remove-button:hover {
+    background-color: #c82333;
+}
+
+.clear-queue-button {
+    padding: 0.5rem 1rem;
+    font-size: 0.9rem;
+    cursor: pointer;
+    background-color: #6c757d;
+    color: white;
+    border: none;
+    border-radius: 5px;
+    align-self: flex-start;
+}
+
+.clear-queue-button:hover {
+    background-color: #5a6268;
+}
+
+.queue-empty {
+    color: light-dark(#666, #999);
+    font-style: italic;
+    margin: 0;
+}
+
+.track-queue-button {
+    margin-left: 0.5rem;
+    font-size: 0.8rem;
+    padding: 0.4rem 0.8rem;
+    cursor: pointer;
+    background-color: #17a2b8;
+    color: white;
+    border: none;
+    border-radius: 3px;
+}
+
+.track-queue-button:hover {
+    background-color: #138496;
+}
+
 .upload-form {
     display: flex;
     flex-direction: column;

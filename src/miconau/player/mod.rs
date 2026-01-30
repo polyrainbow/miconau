@@ -11,12 +11,21 @@ use std::process::Child;
 use serde::Serialize;
 
 #[derive(Serialize, Clone, Debug)]
+pub struct QueueItem {
+    pub playlist_name: String,
+    pub track_title: String,
+    pub file_path: String,
+}
+
+#[derive(Serialize, Clone, Debug)]
 #[serde(tag = "type")]
 pub enum AppEvent {
     #[serde(rename = "playerState")]
     PlayerState(PlayerState),
     #[serde(rename = "libraryUpdated")]
     LibraryUpdated,
+    #[serde(rename = "queueUpdated")]
+    QueueUpdated { queue: Vec<QueueItem> },
 }
 
 #[derive(Serialize, Copy, Clone, Debug)]
@@ -45,6 +54,7 @@ pub struct Player {
     pub state: PlayerState,
     pub event_transmitter: broadcast::Sender<AppEvent>,
     _event_receiver: broadcast::Receiver<AppEvent>,
+    pub queue: Vec<QueueItem>,
 }
 
 impl Player {
@@ -77,6 +87,7 @@ impl Player {
             state: initial_state,
             event_transmitter,
             _event_receiver, // we need to keep the receiver to avoid dropping the channel
+            queue: Vec::new(),
         };
     }
 
@@ -256,6 +267,11 @@ impl Player {
     }
 
     pub fn play_next_track(&mut self) {
+        // If there are items in the queue, play from queue instead
+        if !self.queue.is_empty() {
+            self.play_next_from_queue();
+            return;
+        }
         let _ = self.mpv_controller.run_command(
             MpvCommand::PlaylistNext,
         );
@@ -272,5 +288,80 @@ impl Player {
             source_name: None,
             mode: PlayerMode::Stopped,
         });
+    }
+
+    pub fn add_to_queue(&mut self, playlist_index: usize, track_index: usize) -> Result<(), String> {
+        if playlist_index >= self.library.playlists.len() {
+            return Err("Playlist not found".to_string());
+        }
+        let playlist = &self.library.playlists[playlist_index];
+        if track_index >= playlist.tracks.len() {
+            return Err("Track not found".to_string());
+        }
+        let track = &playlist.tracks[track_index];
+        let track_title = track.filename
+            .file_stem()
+            .map(|s| s.to_string_lossy().to_string())
+            .unwrap_or_else(|| "Unknown".to_string());
+        
+        self.queue.push(QueueItem {
+            playlist_name: playlist.title.clone(),
+            track_title,
+            file_path: track.filename.to_string_lossy().to_string(),
+        });
+        self.notify_queue_updated();
+        Ok(())
+    }
+
+    pub fn remove_from_queue(&mut self, index: usize) -> Result<(), String> {
+        if index >= self.queue.len() {
+            return Err("Queue item not found".to_string());
+        }
+        self.queue.remove(index);
+        self.notify_queue_updated();
+        Ok(())
+    }
+
+    pub fn clear_queue(&mut self) {
+        self.queue.clear();
+        self.notify_queue_updated();
+    }
+
+    pub fn get_queue(&self) -> Vec<QueueItem> {
+        self.queue.clone()
+    }
+
+    fn notify_queue_updated(&self) {
+        match self.event_transmitter.send(AppEvent::QueueUpdated { queue: self.queue.clone() }) {
+            Ok(_) => println!("Queue updated notification sent"),
+            Err(e) => println!("Error sending queue update: {}", e),
+        }
+    }
+
+    pub fn play_next_from_queue(&mut self) -> bool {
+        if self.queue.is_empty() {
+            return false;
+        }
+        let item = self.queue.remove(0);
+        println!("Playing from queue: {}", item.track_title);
+        
+        self.mpv_controller.run_command(
+            MpvCommand::LoadFile {
+                file: item.file_path.clone(),
+                option: PlaylistAddOptions::Replace,
+            }
+        ).unwrap();
+
+        self.mpv_controller.set_property("pause", false)
+            .expect("Error setting pause property to false");
+
+        self.set_state(PlayerState {
+            source_type: Some(SourceType::Playlist),
+            source_name: Some(format!("{} - {}", item.playlist_name, item.track_title)),
+            mode: PlayerMode::Playing,
+        });
+
+        self.notify_queue_updated();
+        true
     }
 }
