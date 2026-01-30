@@ -27,8 +27,13 @@ async function loadPlaylists() {
     playlistsContainer.innerHTML = '';
 
     for (const playlist of playlists) {
+      // Wrapper div for the playlist row
+      const playlistWrapper = document.createElement('div');
+      playlistWrapper.className = 'playlist';
+
+      // Details element for expandable tracks
       const details = document.createElement('details');
-      details.className = 'playlist';
+      details.className = 'playlist-details';
 
       const summary = document.createElement('summary');
       summary.className = 'playlist-summary';
@@ -37,23 +42,21 @@ async function loadPlaylists() {
       titleSpan.textContent = playlist.name;
       titleSpan.className = 'playlist-title';
       
-      const playBtn = document.createElement('button');
-      playBtn.textContent = 'Play';
-      playBtn.className = 'playlist-play-button';
-      playBtn.addEventListener('click', (e) => {
-        e.stopPropagation();
-        e.preventDefault();
-        playPlaylist(playlist.index);
-      });
-      
       summary.appendChild(titleSpan);
-      summary.appendChild(playBtn);
       details.appendChild(summary);
 
       const trackList = document.createElement('ul');
       trackList.className = 'track-list';
       trackList.innerHTML = '<li>Loading...</li>';
       details.appendChild(trackList);
+
+      // Play button outside details/summary for accessibility
+      const playBtn = document.createElement('button');
+      playBtn.textContent = '▶ Play';
+      playBtn.className = 'playlist-play-button';
+      playBtn.addEventListener('click', () => {
+        playPlaylist(playlist.index);
+      });
 
       // Lazy load tracks when opening
       details.addEventListener('toggle', async () => {
@@ -66,8 +69,9 @@ async function loadPlaylists() {
               trackList.innerHTML = '<li><em>No tracks</em></li>';
             } else {
               trackList.innerHTML = tracks.map(track => 
-                `<li>${escapeHtml(track.title)}
-                  <button class="track-play-button" onclick="playPlaylistTrack(${playlist.index}, ${track.index})">Play</button>
+                `<li>
+                  <button class="track-play-button" onclick="playPlaylistTrack(${playlist.index}, ${track.index})">${escapeHtml(track.title)}</button>
+                  <button class="track-queue-button" onclick="addToQueue(${playlist.index}, ${track.index})">Queue</button>
                 </li>`
               ).join('');
             }
@@ -79,7 +83,9 @@ async function loadPlaylists() {
         }
       });
 
-      playlistsContainer.appendChild(details);
+      playlistWrapper.appendChild(details);
+      playlistWrapper.appendChild(playBtn);
+      playlistsContainer.appendChild(playlistWrapper);
     }
   } catch (error) {
     console.error('Error loading playlists:', error);
@@ -124,6 +130,77 @@ async function nextTrack() {
 
 async function previousTrack() {
   await fetch('/api/previous', { method: 'POST' });
+}
+
+async function loadQueue() {
+  try {
+    const response = await fetch('/api/queue');
+    const queue = await response.json();
+    renderQueue(queue);
+  } catch (error) {
+    console.error('Error loading queue:', error);
+  }
+}
+
+function renderQueue(queue) {
+  const queueList = document.getElementById('queue');
+  const queueEmpty = document.getElementById('queueEmpty');
+  const clearBtn = document.getElementById('clearQueueBtn');
+
+  if (queue.length === 0) {
+    queueList.innerHTML = '';
+    queueEmpty.style.display = 'block';
+    clearBtn.style.display = 'none';
+  } else {
+    queueEmpty.style.display = 'none';
+    clearBtn.style.display = 'inline-block';
+    queueList.innerHTML = queue.map((item, index) => `
+      <li class="queue-item">
+        <span class="queue-item-position">${index + 1}.</span>
+        <div class="queue-item-info">
+          <span class="queue-item-title">${escapeHtml(item.track_title)}</span>
+          <span class="queue-item-playlist">${escapeHtml(item.playlist_name)}</span>
+        </div>
+        <button class="queue-remove-button" onclick="removeFromQueue(${index})">Remove</button>
+      </li>
+    `).join('');
+  }
+}
+
+async function addToQueue(playlistIndex, trackIndex) {
+  try {
+    const response = await fetch('/api/queue/add', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ playlist_index: playlistIndex, track_index: trackIndex }),
+    });
+    if (!response.ok) {
+      const error = await response.text();
+      console.error('Error adding to queue:', error);
+    }
+  } catch (error) {
+    console.error('Error adding to queue:', error);
+  }
+}
+
+async function removeFromQueue(index) {
+  try {
+    const response = await fetch(`/api/queue/remove/${index}`, { method: 'POST' });
+    if (!response.ok) {
+      const error = await response.text();
+      console.error('Error removing from queue:', error);
+    }
+  } catch (error) {
+    console.error('Error removing from queue:', error);
+  }
+}
+
+async function clearQueue() {
+  try {
+    await fetch('/api/queue/clear', { method: 'POST' });
+  } catch (error) {
+    console.error('Error clearing queue:', error);
+  }
 }
 
 async function uploadPlaylist() {
@@ -227,6 +304,8 @@ function connectToEvents() {
       renderState(data);
     } else if (data.type === 'libraryUpdated') {
       loadPlaylists();
+    } else if (data.type === 'queueUpdated') {
+      renderQueue(data.queue);
     }
   }
 };
@@ -235,6 +314,7 @@ function connectToEvents() {
 document.addEventListener('DOMContentLoaded', () => {
   loadStreams();
   loadPlaylists();
+  loadQueue();
   connectToEvents();
   fetch('/api/state')
     .then(response => response.json())

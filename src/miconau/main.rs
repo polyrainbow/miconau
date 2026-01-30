@@ -9,6 +9,7 @@ use args::get_args;
 use library::Library;
 use midi_listener::listen;
 use player::Player;
+use player::spawn_mpv_event_listener;
 use tokio::spawn;
 use tokio::sync::Mutex;
 use std::error::Error;
@@ -33,12 +34,16 @@ async fn main() -> Result<(), Box<dyn Error>> {
         rx
     ) = mpsc::channel::<MainThreadEvent>();
 
+    let socket_path = args.mpv_socket.clone();
     let player = Arc::new(
         Mutex::new(
             Player::new(library, args.output_device, args.mpv_socket).await
         )
     );
     println!("Player module initialized");
+
+    // Spawn mpv event listener to sync queue when tracks advance
+    spawn_mpv_event_listener(socket_path, player.clone());
 
     if args.address.is_some() {
         let address = args.address.unwrap();

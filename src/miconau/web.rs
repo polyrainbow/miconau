@@ -33,6 +33,13 @@ struct TrackInfo {
     index: usize,
 }
 
+#[derive(Serialize)]
+struct QueueItemInfo {
+    playlist_name: String,
+    track_title: String,
+    index: usize,
+}
+
 #[derive(Clone)]
 struct ServerState {
     player: Arc<Mutex<Player>>,
@@ -272,6 +279,56 @@ async fn upload_playlist(
     Ok(Json(json!({"success": true})))
 }
 
+async fn get_queue(
+    State(server_state): State<ServerState>,
+) -> Json<Vec<QueueItemInfo>> {
+    let player = server_state.player.lock().await;
+    let queue: Vec<QueueItemInfo> = player.queue
+        .iter()
+        .enumerate()
+        .map(|(index, item)| QueueItemInfo {
+            playlist_name: item.playlist_name.clone(),
+            track_title: item.track_title.clone(),
+            index,
+        })
+        .collect();
+    Json(queue)
+}
+
+#[derive(serde::Deserialize)]
+struct AddToQueueRequest {
+    playlist_index: usize,
+    track_index: usize,
+}
+
+async fn add_to_queue(
+    State(server_state): State<ServerState>,
+    Json(payload): Json<AddToQueueRequest>,
+) -> Result<StatusCode, (StatusCode, String)> {
+    let mut player = server_state.player.lock().await;
+    player.add_to_queue(payload.playlist_index, payload.track_index)
+        .map_err(|e| (StatusCode::BAD_REQUEST, e))?;
+    Ok(StatusCode::OK)
+}
+
+async fn remove_from_queue(
+    State(server_state): State<ServerState>,
+    Path(index): Path<usize>,
+) -> Result<StatusCode, (StatusCode, String)> {
+    let mut player = server_state.player.lock().await;
+    player.remove_from_queue(index)
+        .map_err(|e| (StatusCode::BAD_REQUEST, e))?;
+    Ok(StatusCode::OK)
+}
+
+async fn clear_queue(
+    State(server_state): State<ServerState>,
+) -> StatusCode {
+    let mut player = server_state.player.lock().await;
+    player.clear_queue();
+    StatusCode::OK
+}
+
 
 async fn disable_browser_cache(request: Request, next: Next) -> Response {
     let mut response = next.run(request).await;
@@ -303,6 +360,10 @@ pub async fn start_server(
         .route("/next", post(next_track))
         .route("/previous", post(previous_track))
         .route("/upload-playlist", post(upload_playlist))
+        .route("/queue", get(get_queue))
+        .route("/queue/add", post(add_to_queue))
+        .route("/queue/remove/{index}", post(remove_from_queue))
+        .route("/queue/clear", post(clear_queue))
         .route("/notifications", get(sse_handler))
         .route("/state", get(get_state))
         .layer(DefaultBodyLimit::max(512 * 1024 * 1024))

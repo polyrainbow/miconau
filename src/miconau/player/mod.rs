@@ -1,7 +1,7 @@
 mod mpv_process;
 
 use mpv_process::*;
-use mpvipc::{Mpv, MpvCommand, NumberChangeOptions, PlaylistAddOptions};
+use mpvipc::{Event, Mpv, MpvCommand, NumberChangeOptions, PlaylistAddOptions};
 use tokio::sync::{broadcast};
 
 use crate::library::{Library};
@@ -11,12 +11,21 @@ use std::process::Child;
 use serde::Serialize;
 
 #[derive(Serialize, Clone, Debug)]
+pub struct QueueItem {
+    pub playlist_name: String,
+    pub track_title: String,
+    pub file_path: String,
+}
+
+#[derive(Serialize, Clone, Debug)]
 #[serde(tag = "type")]
 pub enum AppEvent {
     #[serde(rename = "playerState")]
     PlayerState(PlayerState),
     #[serde(rename = "libraryUpdated")]
     LibraryUpdated,
+    #[serde(rename = "queueUpdated")]
+    QueueUpdated { queue: Vec<QueueItem> },
 }
 
 #[derive(Serialize, Copy, Clone, Debug)]
@@ -45,6 +54,7 @@ pub struct Player {
     pub state: PlayerState,
     pub event_transmitter: broadcast::Sender<AppEvent>,
     _event_receiver: broadcast::Receiver<AppEvent>,
+    pub queue: Vec<QueueItem>,
 }
 
 impl Player {
@@ -62,7 +72,7 @@ impl Player {
             NumberChangeOptions::Absolute,
         ).unwrap();
 
-        let (event_transmitter, _event_receiver) = broadcast::channel(1);
+        let (event_transmitter, _event_receiver) = broadcast::channel(16);
 
         let initial_state = PlayerState {
             source_type: None,
@@ -77,6 +87,7 @@ impl Player {
             state: initial_state,
             event_transmitter,
             _event_receiver, // we need to keep the receiver to avoid dropping the channel
+            queue: Vec::new(),
         };
     }
 
@@ -256,6 +267,11 @@ impl Player {
     }
 
     pub fn play_next_track(&mut self) {
+        // If there are items in the queue, play from queue instead
+        if !self.queue.is_empty() {
+            self.play_next_from_queue();
+            return;
+        }
         let _ = self.mpv_controller.run_command(
             MpvCommand::PlaylistNext,
         );
@@ -273,4 +289,206 @@ impl Player {
             mode: PlayerMode::Stopped,
         });
     }
+
+    pub fn add_to_queue(&mut self, playlist_index: usize, track_index: usize) -> Result<(), String> {
+        if playlist_index >= self.library.playlists.len() {
+            return Err("Playlist not found".to_string());
+        }
+        let playlist = &self.library.playlists[playlist_index];
+        if track_index >= playlist.tracks.len() {
+            return Err("Track not found".to_string());
+        }
+        let track = &playlist.tracks[track_index];
+        let track_title = track.filename
+            .file_stem()
+            .map(|s| s.to_string_lossy().to_string())
+            .unwrap_or_else(|| "Unknown".to_string());
+        let file_path = track.filename.to_string_lossy().to_string();
+
+        // Append to mpv's internal playlist
+        self.mpv_controller.run_command(
+            MpvCommand::LoadFile {
+                file: file_path.clone(),
+                option: PlaylistAddOptions::Append,
+            }
+        ).map_err(|e| format!("Failed to append to mpv playlist: {}", e))?;
+
+        // Add to our queue for UI display
+        self.queue.push(QueueItem {
+            playlist_name: playlist.title.clone(),
+            track_title,
+            file_path,
+        });
+        self.notify_queue_updated();
+        Ok(())
+    }
+
+    pub fn remove_from_queue(&mut self, index: usize) -> Result<(), String> {
+        if index >= self.queue.len() {
+            return Err("Queue item not found".to_string());
+        }
+        
+        // Get current playlist position to calculate the correct mpv playlist index
+        // Queue items are appended after the current playlist, so we need to offset
+        let current_pos: usize = self.mpv_controller
+            .get_property("playlist-pos")
+            .unwrap_or(0);
+        let mpv_index = current_pos + 1 + index;
+        
+        // Remove from mpv's playlist
+        let _ = self.mpv_controller.run_command_raw(
+            "playlist-remove",
+            &[&mpv_index.to_string()],
+        );
+        
+        self.queue.remove(index);
+        self.notify_queue_updated();
+        Ok(())
+    }
+
+    pub fn clear_queue(&mut self) {
+        // Get current playlist position
+        let current_pos: usize = self.mpv_controller
+            .get_property("playlist-pos")
+            .unwrap_or(0);
+        
+        let playlist_count: usize = self.mpv_controller
+            .get_property("playlist-count")
+            .unwrap_or(0);
+        
+        // Remove all items after the current position from mpv's playlist
+        if playlist_count > current_pos + 1 {
+            // Remove from the end to avoid index shifting issues
+            for i in ((current_pos + 1)..playlist_count).rev() {
+                let _ = self.mpv_controller.run_command_raw(
+                    "playlist-remove",
+                    &[&i.to_string()],
+                );
+            }
+        }
+        
+        self.queue.clear();
+        self.notify_queue_updated();
+    }
+
+    pub fn get_queue(&self) -> Vec<QueueItem> {
+        self.queue.clone()
+    }
+
+    fn notify_queue_updated(&self) {
+        match self.event_transmitter.send(AppEvent::QueueUpdated { queue: self.queue.clone() }) {
+            Ok(_) => println!("Queue updated notification sent"),
+            Err(e) => println!("Error sending queue update: {}", e),
+        }
+    }
+
+    pub fn play_next_from_queue(&mut self) -> bool {
+        if self.queue.is_empty() {
+            return false;
+        }
+        let item = self.queue.remove(0);
+        println!("Playing from queue: {}", item.track_title);
+        
+        self.mpv_controller.run_command(
+            MpvCommand::LoadFile {
+                file: item.file_path.clone(),
+                option: PlaylistAddOptions::Replace,
+            }
+        ).unwrap();
+
+        self.mpv_controller.set_property("pause", false)
+            .expect("Error setting pause property to false");
+
+        self.set_state(PlayerState {
+            source_type: Some(SourceType::Playlist),
+            source_name: Some(format!("{} - {}", item.playlist_name, item.track_title)),
+            mode: PlayerMode::Playing,
+        });
+
+        self.notify_queue_updated();
+        true
+    }
+
+    /// Called when mpv advances to the next track in its playlist.
+    /// Syncs the Rust queue by removing the first item if the queue is non-empty
+    /// and we're past the first track in mpv's playlist.
+    pub fn on_track_started(&mut self) {
+        // Check if we have queue items and we're playing a queued track
+        // mpv's playlist-pos > 0 means we've advanced beyond the first track
+        let playlist_pos: usize = self.mpv_controller
+            .get_property("playlist-pos")
+            .unwrap_or(0);
+        
+        if !self.queue.is_empty() && playlist_pos > 0 {
+            // We're playing a track from the queue
+            let item = self.queue.remove(0);
+            println!("Playing queued track: {} - {}", item.playlist_name, item.track_title);
+            
+            // Update state to show the new track
+            self.set_state(PlayerState {
+                source_type: Some(SourceType::Playlist),
+                source_name: Some(format!("{} - {}", item.playlist_name, item.track_title)),
+                mode: PlayerMode::Playing,
+            });
+            
+            self.notify_queue_updated();
+        }
+    }
+}
+
+/// Spawns a background task that listens for mpv events and syncs the queue.
+/// This should be called after creating the Player.
+pub fn spawn_mpv_event_listener(
+    socket_path: String,
+    player: std::sync::Arc<tokio::sync::Mutex<Player>>,
+) {
+    std::thread::spawn(move || {
+        // Create a separate mpv connection for event listening
+        let mut event_mpv = match Mpv::connect(&socket_path) {
+            Ok(mpv) => mpv,
+            Err(e) => {
+                eprintln!("Failed to connect event listener to mpv: {}", e);
+                return;
+            }
+        };
+        
+        println!("MPV event listener started");
+        
+        loop {
+            match event_mpv.event_listen() {
+                Ok(Event::StartFile) => {
+                    println!("MPV: StartFile event received");
+                    // A new file started - sync queue and update status
+                    // Use a blocking approach with retry
+                    loop {
+                        match player.try_lock() {
+                            Ok(mut player_guard) => {
+                                player_guard.on_track_started();
+                                break;
+                            }
+                            Err(_) => {
+                                std::thread::sleep(std::time::Duration::from_millis(10));
+                            }
+                        }
+                    }
+                }
+                Ok(Event::Idle) => {
+                    println!("MPV: Idle event received");
+                }
+                Ok(Event::Shutdown) => {
+                    println!("MPV: Shutdown event received");
+                    break;
+                }
+                Ok(_) => {
+                    // Ignore other events
+                }
+                Err(e) => {
+                    eprintln!("MPV event listener error: {}", e);
+                    break;
+                }
+            }
+        }
+        
+        println!("MPV event listener stopped");
+    });
 }
