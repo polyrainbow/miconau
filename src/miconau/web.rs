@@ -4,7 +4,7 @@ use tokio::sync::Mutex;
 use tower::ServiceBuilder;
 use tower_http::services::ServeDir;
 use std::{env::current_exe, path::PathBuf, sync::{Arc}};
-use crate::{library::Stream as AudioStream, player::{Player, PlayerState, AppEvent}};
+use crate::{library::Stream as AudioStream, player::{Player, PlayerState}};
 use std::error::Error;
 use axum::response::IntoResponse;
 use futures_util::stream::{Stream};
