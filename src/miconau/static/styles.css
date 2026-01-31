@@ -257,6 +257,11 @@ h1 {
     font-size: 0.95rem;
 }
 
+.queue-item-artist {
+    font-size: 0.85rem;
+    color: light-dark(#444, #bbb);
+}
+
 .queue-item-playlist {
     font-size: 0.8rem;
     color: light-dark(#666, #999);

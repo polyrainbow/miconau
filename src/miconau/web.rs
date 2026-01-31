@@ -38,6 +38,7 @@ struct TrackInfo {
 struct QueueItemInfo {
     playlist_name: String,
     track_title: String,
+    track_artist: Option<String>,
     index: usize,
 }
 
@@ -293,6 +294,7 @@ async fn get_queue(
         .map(|(index, item)| QueueItemInfo {
             playlist_name: item.playlist_name.clone(),
             track_title: item.track_title.clone(),
+            track_artist: item.track_artist.clone(),
             index,
         })
         .collect();

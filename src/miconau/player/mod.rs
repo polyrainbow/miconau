@@ -14,6 +14,7 @@ use serde::Serialize;
 pub struct QueueItem {
     pub playlist_name: String,
     pub track_title: String,
+    pub track_artist: Option<String>,
     pub file_path: String,
 }
 
@@ -299,10 +300,13 @@ impl Player {
             return Err("Track not found".to_string());
         }
         let track = &playlist.tracks[track_index];
-        let track_title = track.filename
-            .file_stem()
-            .map(|s| s.to_string_lossy().to_string())
-            .unwrap_or_else(|| "Unknown".to_string());
+        let track_title = track.title.clone().unwrap_or_else(|| {
+            track.filename
+                .file_stem()
+                .map(|s| s.to_string_lossy().to_string())
+                .unwrap_or_else(|| "Unknown".to_string())
+        });
+        let track_artist = track.artist.clone();
         let file_path = track.filename.to_string_lossy().to_string();
 
         // Append to mpv's internal playlist
@@ -317,6 +321,7 @@ impl Player {
         self.queue.push(QueueItem {
             playlist_name: playlist.title.clone(),
             track_title,
+            track_artist,
             file_path,
         });
         self.notify_queue_updated();

@@ -173,6 +173,7 @@ function renderQueue(queue) {
         <span class="queue-item-position">${index + 1}.</span>
         <div class="queue-item-info">
           <span class="queue-item-title">${escapeHtml(item.track_title)}</span>
+          ${item.track_artist ? `<span class="queue-item-artist">${escapeHtml(item.track_artist)}</span>` : ''}
           <span class="queue-item-playlist">${escapeHtml(item.playlist_name)}</span>
         </div>
         <button class="queue-remove-button" onclick="removeFromQueue(${index})">Remove</button>
