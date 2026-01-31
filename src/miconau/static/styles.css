@@ -151,7 +151,7 @@ h1 {
 /* Inner play button (inside details, visible when expanded) */
 .playlist-play-button-inner {
     display: none;
-    font-size: 0.8rem;
+    font-size: large;
     padding: 0.4rem 0.8rem;
     cursor: pointer;
     background-color: #4CAF50;
@@ -325,6 +325,10 @@ h1 {
     align-items: flex-start;
     flex-grow: 1;
     text-align: start;
+
+    &:hover {
+        background-color: light-dark(#e0f7ff, rgba(0,0,0,0.2));
+    }
 
     .track-title {
         font-size: large;
