@@ -45,6 +45,15 @@ async function loadPlaylists() {
       summary.appendChild(titleSpan);
       details.appendChild(summary);
 
+      // Inner play button (visible when expanded, outside summary for accessibility)
+      const innerPlayBtn = document.createElement('button');
+      innerPlayBtn.textContent = '▶ Play';
+      innerPlayBtn.className = 'playlist-play-button-inner';
+      innerPlayBtn.addEventListener('click', () => {
+        playPlaylist(playlist.index);
+      });
+      details.appendChild(innerPlayBtn);
+
       const trackList = document.createElement('ul');
       trackList.className = 'track-list';
       trackList.innerHTML = '<li>Loading...</li>';
