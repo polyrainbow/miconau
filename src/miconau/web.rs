@@ -30,6 +30,7 @@ struct PlaylistInfo {
 #[derive(Serialize)]
 struct TrackInfo {
     title: String,
+    artist: Option<String>,
     index: usize,
 }
 
@@ -142,12 +143,15 @@ async fn get_playlist_tracks(
         .iter()
         .enumerate()
         .map(|(track_index, track)| {
-            let title = track.filename
-                .file_stem()
-                .map(|s| s.to_string_lossy().to_string())
-                .unwrap_or_else(|| "Unknown".to_string());
+            let title = track.title.clone().unwrap_or_else(|| {
+                track.filename
+                    .file_stem()
+                    .map(|s| s.to_string_lossy().to_string())
+                    .unwrap_or_else(|| "Unknown".to_string())
+            });
             TrackInfo {
                 title,
+                artist: track.artist.clone(),
                 index: track_index,
             }
         })

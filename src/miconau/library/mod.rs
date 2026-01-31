@@ -1,9 +1,28 @@
 use std::{
     fs, path::PathBuf
 };
+use lofty::prelude::*;
+use lofty::probe::Probe;
 
 pub struct Track {
     pub filename: PathBuf,
+    pub artist: Option<String>,
+    pub title: Option<String>,
+}
+
+fn read_track_metadata(path: &PathBuf) -> (Option<String>, Option<String>) {
+    match Probe::open(path).and_then(|p| p.read()) {
+        Ok(tagged_file) => {
+            if let Some(tag) = tagged_file.primary_tag().or_else(|| tagged_file.first_tag()) {
+                let artist = tag.artist().map(|s| s.to_string());
+                let title = tag.title().map(|s| s.to_string());
+                (artist, title)
+            } else {
+                (None, None)
+            }
+        }
+        Err(_) => (None, None)
+    }
 }
 
 pub struct Playlist {
@@ -68,8 +87,12 @@ impl Library {
                                 && allowed_extensions.contains(&extension_str)
                                 && filename_is_valid
                             {
+                                let track_path = dir_entry.path();
+                                let (artist, title) = read_track_metadata(&track_path);
                                 let track = Track {
-                                    filename: dir_entry.path(),
+                                    filename: track_path,
+                                    artist,
+                                    title,
                                 };
                                 album.tracks.push(track);
                             }
