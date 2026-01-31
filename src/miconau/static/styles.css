@@ -155,13 +155,16 @@ h1 {
 .track-list {
     list-style: disc inside;
     margin: 0 0 0.5rem 0;
-    padding: 0 1.5rem 0.5rem 1.5rem;
+    padding: 0;
+    padding-right: 0.5rem;
     font-size: 0.9rem;
     color: light-dark(#333, #ccc);
 
     li {
         padding: 0.2em 0em;
         list-style: none;
+        display: flex;
+        justify-content: space-between;
     }
 }
 .active {
@@ -276,7 +279,6 @@ h1 {
 
 .track-play-button,
 .track-queue-button {
-    margin-left: 0.5rem;
     font-size: 0.8rem;
     padding: 0.4rem 0.8rem;
     cursor: pointer;
@@ -286,11 +288,16 @@ h1 {
 }
 
 .track-play-button {
-    background-color: #4CAF50;
-}
+    background-color: transparent;
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    flex-grow: 1;
+    text-align: start;
 
-.track-play-button:hover {
-    background-color: #45a049;
+    .track-title {
+        font-size: large;
+    }
 }
 
 .track-queue-button {
