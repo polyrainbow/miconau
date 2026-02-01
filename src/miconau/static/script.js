@@ -81,7 +81,7 @@ async function loadPlaylists() {
                 `<li>
                   <button class="track-play-button" onclick="playPlaylistTrack(${playlist.index}, ${track.index})">
                     <span class="track-title">${escapeHtml(track.title)}</span>
-                    <span class="track-artist">${escapeHtml(track.artist)}</span>
+                    ${track.artist ? `<span class="track-artist">${escapeHtml(track.artist)}</span>` : ''}
                   </button>
                   <button class="track-queue-button" onclick="addToQueue(${playlist.index}, ${track.index})">
                     <img src="/icons/queue_music.svg" alt="Add to queue" class="queue-icon">
