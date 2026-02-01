@@ -39,8 +39,7 @@ enum PlayerMode {
 #[derive(Serialize, Clone, Debug)]
 enum SourceInfo {
     Stream { stream_name: String },
-    Playlist { track_title: String, artist: Option<String>, playlist_name: String },
-    Queue { track_title: String, artist: Option<String>, playlist_name: String },
+    Track { track_title: String, artist: Option<String>, playlist_name: String },
 }
 #[derive(Serialize, Clone, Debug)]
 pub struct PlayerState {
@@ -150,8 +149,26 @@ impl Player {
             self.mpv_controller.set_property("pause", false)
                 .expect("Error setting pause property to false");
 
+            // Clear any existing queue and populate with remaining tracks from playlist
+            self.queue.clear();
+            for track in playlist.tracks.iter().skip(1) {
+                let queue_track_title = track.title.clone().unwrap_or_else(|| {
+                    track.filename
+                        .file_stem()
+                        .map(|s| s.to_string_lossy().to_string())
+                        .unwrap_or_else(|| "Unknown".to_string())
+                });
+                self.queue.push(QueueItem {
+                    playlist_name: playlist_name.clone(),
+                    track_title: queue_track_title,
+                    track_artist: track.artist.clone(),
+                    file_path: track.filename.to_string_lossy().to_string(),
+                });
+            }
+            self.notify_queue_updated();
+
             self.set_state(PlayerState {
-                source_info: Some(SourceInfo::Playlist {
+                source_info: Some(SourceInfo::Track {
                     track_title,
                     artist,
                     playlist_name,
@@ -204,7 +221,7 @@ impl Player {
                 .expect("Error setting pause property to false");
 
             self.set_state(PlayerState {
-                source_info: Some(SourceInfo::Playlist {
+                source_info: Some(SourceInfo::Track {
                     track_title,
                     artist,
                     playlist_name,
@@ -315,7 +332,7 @@ impl Player {
 
         // Try to find the current playlist from state
         let playlist_name = match &self.state.source_info {
-            Some(SourceInfo::Playlist { playlist_name, .. }) => playlist_name.clone(),
+            Some(SourceInfo::Track { playlist_name, .. }) => playlist_name.clone(),
             _ => return, // Not playing a playlist, don't update
         };
 
@@ -336,7 +353,7 @@ impl Player {
             let artist = track.artist.clone();
 
             self.set_state(PlayerState {
-                source_info: Some(SourceInfo::Playlist {
+                source_info: Some(SourceInfo::Track {
                     track_title,
                     artist,
                     playlist_name,
@@ -468,7 +485,7 @@ impl Player {
             .expect("Error setting pause property to false");
 
         self.set_state(PlayerState {
-            source_info: Some(SourceInfo::Queue {
+            source_info: Some(SourceInfo::Track {
                 track_title: item.track_title,
                 artist: item.track_artist,
                 playlist_name: item.playlist_name,
@@ -497,7 +514,7 @@ impl Player {
             
             // Update state to show the new track
             self.set_state(PlayerState {
-                source_info: Some(SourceInfo::Queue {
+                source_info: Some(SourceInfo::Track {
                     track_title: item.track_title,
                     artist: item.track_artist,
                     playlist_name: item.playlist_name,
@@ -599,7 +616,7 @@ mod tests {
     #[test]
     fn player_state_serializes_correctly_for_playlist() {
         let state = PlayerState {
-            source_info: Some(SourceInfo::Playlist {
+            source_info: Some(SourceInfo::Track {
                 track_title: "My Song".to_string(),
                 artist: Some("The Artist".to_string()),
                 playlist_name: "My Playlist".to_string(),
@@ -616,7 +633,7 @@ mod tests {
     #[test]
     fn player_state_serializes_correctly_for_playlist_without_artist() {
         let state = PlayerState {
-            source_info: Some(SourceInfo::Playlist {
+            source_info: Some(SourceInfo::Track {
                 track_title: "Unknown Track".to_string(),
                 artist: None,
                 playlist_name: "Untitled".to_string(),
@@ -631,7 +648,7 @@ mod tests {
     #[test]
     fn player_state_serializes_correctly_for_queue() {
         let state = PlayerState {
-            source_info: Some(SourceInfo::Queue {
+            source_info: Some(SourceInfo::Track {
                 track_title: "Queued Song".to_string(),
                 artist: Some("Queue Artist".to_string()),
                 playlist_name: "Source Playlist".to_string(),
