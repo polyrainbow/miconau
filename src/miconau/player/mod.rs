@@ -338,14 +338,7 @@ impl Player {
         let _ = self.mpv_controller.run_command(
             MpvCommand::PlaylistNext,
         );
-
-        // Remove the first item from queue since we're advancing
-        if !self.queue.is_empty() {
-            self.queue.remove(0);
-            self.notify_queue_updated();
-        }
-
-        self.update_state_from_mpv_playlist();
+        // Queue sync is handled by on_track_started when mpv fires StartFile event
     }
 
     /// Updates the player state based on the current mpv playlist position.
