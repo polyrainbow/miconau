@@ -10,30 +10,6 @@
 <body>
     <div class="container">
         <h1>Miconau Player</h1>
-        <p id="status">Loading...</p>
-
-        <div class="controls">
-            <button
-              class="transport-button"
-              onclick="playPause()" id="playPauseBtn">
-                <img src="/icons/play_pause.svg" alt="Play/Pause">
-            </button>
-            <button
-              class="transport-button"
-              onclick="previousTrack()">
-                <img src="/icons/skip_previous.svg" alt="Previous">
-            </button>
-            <button
-              class="transport-button"
-              onclick="nextTrack()">
-                <img src="/icons/skip_next.svg" alt="Next">
-            </button>
-            <button
-              class="transport-button"
-              onclick="stop()">
-                <img src="/icons/stop.svg" alt="Stop">
-            </button>
-        </div>
         
         <div class="section">
             <h2>Streams</h2>
@@ -68,6 +44,32 @@
                 <button class="upload-button" onclick="uploadPlaylist()">Upload Playlist</button>
                 <div id="uploadStatus"></div>
             </div>
+        </div>
+    </div>
+
+    <div class="bottom-panel">
+        <p id="status">Loading...</p>
+        <div class="controls">
+            <button
+              class="transport-button"
+              onclick="playPause()" id="playPauseBtn">
+                <img src="/icons/play_pause.svg" alt="Play/Pause">
+            </button>
+            <button
+              class="transport-button"
+              onclick="previousTrack()">
+                <img src="/icons/skip_previous.svg" alt="Previous">
+            </button>
+            <button
+              class="transport-button"
+              onclick="nextTrack()">
+                <img src="/icons/skip_next.svg" alt="Next">
+            </button>
+            <button
+              class="transport-button"
+              onclick="stop()">
+                <img src="/icons/stop.svg" alt="Stop">
+            </button>
         </div>
     </div>
 </body>
