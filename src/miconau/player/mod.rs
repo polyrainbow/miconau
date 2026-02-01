@@ -29,22 +29,22 @@ pub enum AppEvent {
     QueueUpdated { queue: Vec<QueueItem> },
 }
 
-#[derive(Serialize, Copy, Clone, Debug)]
+#[derive(Serialize, Clone, Debug)]
 enum PlayerMode {
     Paused,
     Playing,
     Stopped,
 }
 
-#[derive(Serialize, Copy, Clone, Debug)]
-enum SourceType {
-    Stream,
-    Playlist,
+#[derive(Serialize, Clone, Debug)]
+enum SourceInfo {
+    Stream { stream_name: String },
+    Playlist { track_title: String, artist: Option<String>, playlist_name: String },
+    Queue { track_title: String, artist: Option<String>, playlist_name: String },
 }
 #[derive(Serialize, Clone, Debug)]
 pub struct PlayerState {
-    source_type: Option<SourceType>,
-    source_name: Option<String>,
+    source_info: Option<SourceInfo>,
     mode: PlayerMode,
 }
 
@@ -76,8 +76,7 @@ impl Player {
         let (event_transmitter, _event_receiver) = broadcast::channel(16);
 
         let initial_state = PlayerState {
-            source_type: None,
-            source_name: None,
+            source_info: None,
             mode: PlayerMode::Stopped,
         };
 
@@ -117,11 +116,25 @@ impl Player {
     pub fn play_playlist(&mut self, playlist_index: u8) {
         if playlist_index < self.library.playlists.len() as u8 {
             let playlist = self.library.playlists.get(playlist_index as usize).unwrap();
-            let title = &playlist.title;
-            println!("Playing playlist {}", title);
+            let playlist_name = playlist.title.clone();
+            println!("Playing playlist {}", playlist_name);
             let mut path = self.library.folder.clone();
             path.push_str("/");
-            path.push_str(title);
+            path.push_str(&playlist_name);
+            
+            // Get first track info for display
+            let (track_title, artist) = if let Some(first_track) = playlist.tracks.first() {
+                let title = first_track.title.clone().unwrap_or_else(|| {
+                    first_track.filename
+                        .file_stem()
+                        .map(|s| s.to_string_lossy().to_string())
+                        .unwrap_or_else(|| "Unknown".to_string())
+                });
+                (title, first_track.artist.clone())
+            } else {
+                (String::new(), None)
+            };
+            
             self.mpv_controller.run_command(
                 MpvCommand::LoadFile {
                     file: path,
@@ -138,16 +151,18 @@ impl Player {
                 .expect("Error setting pause property to false");
 
             self.set_state(PlayerState {
-                source_type: Some(SourceType::Playlist),
-                source_name: Some(title.clone()),
+                source_info: Some(SourceInfo::Playlist {
+                    track_title,
+                    artist,
+                    playlist_name,
+                }),
                 mode: PlayerMode::Playing,
             });
         } else {
             println!("Playlist with index {} not found. Playing error sound.", playlist_index);
             self.play_error();
             self.set_state(PlayerState {
-                source_type: None,
-                source_name: None,
+                source_info: None,
                 mode: PlayerMode::Stopped,
             });
         }
@@ -161,9 +176,17 @@ impl Player {
         if playlist_index < self.library.playlists.len() as u8 {
             let playlist = self.library.playlists
                 .get(playlist_index as usize).unwrap();
-            let title = &playlist.title;
-            let track_path = &playlist.tracks
-                .get(track_index as usize).unwrap().filename;
+            let playlist_name = playlist.title.clone();
+            let track = playlist.tracks
+                .get(track_index as usize).unwrap();
+            let track_path = &track.filename;
+            let track_title = track.title.clone().unwrap_or_else(|| {
+                track_path
+                    .file_stem()
+                    .map(|s| s.to_string_lossy().to_string())
+                    .unwrap_or_else(|| "Unknown".to_string())
+            });
+            let artist = track.artist.clone();
             println!("Playing track {}", track_path.clone().to_string_lossy());
             self.mpv_controller.run_command(
                 MpvCommand::LoadFile {
@@ -181,16 +204,18 @@ impl Player {
                 .expect("Error setting pause property to false");
 
             self.set_state(PlayerState {
-                source_type: Some(SourceType::Playlist),
-                source_name: Some(title.clone()),
+                source_info: Some(SourceInfo::Playlist {
+                    track_title,
+                    artist,
+                    playlist_name,
+                }),
                 mode: PlayerMode::Playing,
             });
         } else {
             println!("Playlist with index {} not found. Playing error sound.", playlist_index);
             self.play_error();
             self.set_state(PlayerState {
-                source_type: None,
-                source_name: None,
+                source_info: None,
                 mode: PlayerMode::Stopped,
             });
         }
@@ -216,16 +241,16 @@ impl Player {
                 .expect("Error setting pause property to false");
 
             self.set_state(PlayerState {
-                source_type: Some(SourceType::Stream),
-                source_name: Some(stream.name.clone()),
+                source_info: Some(SourceInfo::Stream {
+                    stream_name: stream.name.clone(),
+                }),
                 mode: PlayerMode::Playing,
             });
         } else {
             println!("Stream with index {} not found. Playing error sound.", stream_index);
             self.play_error();
             self.set_state(PlayerState {
-                source_type: None,
-                source_name: None,
+                source_info: None,
                 mode: PlayerMode::Stopped,
             });
         }
@@ -255,8 +280,7 @@ impl Player {
             .expect("Error pausing");
 
         self.set_state(PlayerState {
-            source_type: self.state.source_type,
-            source_name: self.state.source_name.clone(),
+            source_info: self.state.source_info.clone(),
             mode: if is_paused { PlayerMode::Playing } else { PlayerMode::Paused },
         });
     }
@@ -265,6 +289,7 @@ impl Player {
         let _ = self.mpv_controller.run_command(
             MpvCommand::PlaylistPrev,
         );
+        self.update_state_from_mpv_playlist();
     }
 
     pub fn play_next_track(&mut self) {
@@ -276,6 +301,49 @@ impl Player {
         let _ = self.mpv_controller.run_command(
             MpvCommand::PlaylistNext,
         );
+        self.update_state_from_mpv_playlist();
+    }
+
+    /// Updates the player state based on the current mpv playlist position.
+    /// Used after playlist-next/playlist-prev commands.
+    fn update_state_from_mpv_playlist(&mut self) {
+        // Get current playlist position from mpv
+        let playlist_pos: usize = match self.mpv_controller.get_property("playlist-pos") {
+            Ok(pos) => pos,
+            Err(_) => return, // Can't get position, don't update state
+        };
+
+        // Try to find the current playlist from state
+        let playlist_name = match &self.state.source_info {
+            Some(SourceInfo::Playlist { playlist_name, .. }) => playlist_name.clone(),
+            _ => return, // Not playing a playlist, don't update
+        };
+
+        // Find the playlist in the library
+        let playlist = match self.library.playlists.iter().find(|p| p.title == playlist_name) {
+            Some(p) => p,
+            None => return,
+        };
+
+        // Get the track at the current position
+        if let Some(track) = playlist.tracks.get(playlist_pos) {
+            let track_title = track.title.clone().unwrap_or_else(|| {
+                track.filename
+                    .file_stem()
+                    .map(|s| s.to_string_lossy().to_string())
+                    .unwrap_or_else(|| "Unknown".to_string())
+            });
+            let artist = track.artist.clone();
+
+            self.set_state(PlayerState {
+                source_info: Some(SourceInfo::Playlist {
+                    track_title,
+                    artist,
+                    playlist_name,
+                }),
+                mode: PlayerMode::Playing,
+            });
+        }
     }
 
     pub fn stop(&mut self) {
@@ -285,8 +353,7 @@ impl Player {
         ).unwrap();
 
         self.set_state(PlayerState {
-            source_type: None,
-            source_name: None,
+            source_info: None,
             mode: PlayerMode::Stopped,
         });
     }
@@ -405,8 +472,11 @@ impl Player {
             .expect("Error setting pause property to false");
 
         self.set_state(PlayerState {
-            source_type: Some(SourceType::Playlist),
-            source_name: Some(format!("{} - {}", item.playlist_name, item.track_title)),
+            source_info: Some(SourceInfo::Queue {
+                track_title: item.track_title,
+                artist: item.track_artist,
+                playlist_name: item.playlist_name,
+            }),
             mode: PlayerMode::Playing,
         });
 
@@ -431,8 +501,11 @@ impl Player {
             
             // Update state to show the new track
             self.set_state(PlayerState {
-                source_type: Some(SourceType::Playlist),
-                source_name: Some(format!("{} - {}", item.playlist_name, item.track_title)),
+                source_info: Some(SourceInfo::Queue {
+                    track_title: item.track_title,
+                    artist: item.track_artist,
+                    playlist_name: item.playlist_name,
+                }),
                 mode: PlayerMode::Playing,
             });
             
@@ -496,4 +569,131 @@ pub fn spawn_mpv_event_listener(
         
         println!("MPV event listener stopped");
     });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn player_state_serializes_correctly_when_stopped() {
+        let state = PlayerState {
+            source_info: None,
+            mode: PlayerMode::Stopped,
+        };
+        let json = serde_json::to_string(&state).unwrap();
+        assert!(json.contains("\"mode\":\"Stopped\""));
+        assert!(json.contains("\"source_info\":null"));
+    }
+
+    #[test]
+    fn player_state_serializes_correctly_for_stream() {
+        let state = PlayerState {
+            source_info: Some(SourceInfo::Stream {
+                stream_name: "Test Radio".to_string(),
+            }),
+            mode: PlayerMode::Playing,
+        };
+        let json = serde_json::to_string(&state).unwrap();
+        assert!(json.contains("\"mode\":\"Playing\""));
+        assert!(json.contains("\"Stream\""));
+        assert!(json.contains("\"stream_name\":\"Test Radio\""));
+    }
+
+    #[test]
+    fn player_state_serializes_correctly_for_playlist() {
+        let state = PlayerState {
+            source_info: Some(SourceInfo::Playlist {
+                track_title: "My Song".to_string(),
+                artist: Some("The Artist".to_string()),
+                playlist_name: "My Playlist".to_string(),
+            }),
+            mode: PlayerMode::Playing,
+        };
+        let json = serde_json::to_string(&state).unwrap();
+        assert!(json.contains("\"Playlist\""));
+        assert!(json.contains("\"track_title\":\"My Song\""));
+        assert!(json.contains("\"artist\":\"The Artist\""));
+        assert!(json.contains("\"playlist_name\":\"My Playlist\""));
+    }
+
+    #[test]
+    fn player_state_serializes_correctly_for_playlist_without_artist() {
+        let state = PlayerState {
+            source_info: Some(SourceInfo::Playlist {
+                track_title: "Unknown Track".to_string(),
+                artist: None,
+                playlist_name: "Untitled".to_string(),
+            }),
+            mode: PlayerMode::Paused,
+        };
+        let json = serde_json::to_string(&state).unwrap();
+        assert!(json.contains("\"mode\":\"Paused\""));
+        assert!(json.contains("\"artist\":null"));
+    }
+
+    #[test]
+    fn player_state_serializes_correctly_for_queue() {
+        let state = PlayerState {
+            source_info: Some(SourceInfo::Queue {
+                track_title: "Queued Song".to_string(),
+                artist: Some("Queue Artist".to_string()),
+                playlist_name: "Source Playlist".to_string(),
+            }),
+            mode: PlayerMode::Playing,
+        };
+        let json = serde_json::to_string(&state).unwrap();
+        assert!(json.contains("\"Queue\""));
+        assert!(json.contains("\"track_title\":\"Queued Song\""));
+    }
+
+    #[test]
+    fn app_event_serializes_with_type_tag() {
+        let event = AppEvent::PlayerState(PlayerState {
+            source_info: None,
+            mode: PlayerMode::Stopped,
+        });
+        let json = serde_json::to_string(&event).unwrap();
+        assert!(json.contains("\"type\":\"playerState\""));
+    }
+
+    #[test]
+    fn app_event_library_updated_serializes_correctly() {
+        let event = AppEvent::LibraryUpdated;
+        let json = serde_json::to_string(&event).unwrap();
+        assert!(json.contains("\"type\":\"libraryUpdated\""));
+    }
+
+    #[test]
+    fn app_event_queue_updated_serializes_correctly() {
+        let event = AppEvent::QueueUpdated {
+            queue: vec![
+                QueueItem {
+                    playlist_name: "Test Playlist".to_string(),
+                    track_title: "Test Track".to_string(),
+                    track_artist: Some("Test Artist".to_string()),
+                    file_path: "/path/to/file.flac".to_string(),
+                }
+            ],
+        };
+        let json = serde_json::to_string(&event).unwrap();
+        assert!(json.contains("\"type\":\"queueUpdated\""));
+        assert!(json.contains("\"queue\""));
+        assert!(json.contains("\"track_title\":\"Test Track\""));
+    }
+
+    #[test]
+    fn queue_item_serializes_correctly() {
+        let item = QueueItem {
+            playlist_name: "Album".to_string(),
+            track_title: "Song".to_string(),
+            track_artist: None,
+            file_path: "/music/song.flac".to_string(),
+        };
+        let json = serde_json::to_string(&item).unwrap();
+        assert!(json.contains("\"playlist_name\":\"Album\""));
+        assert!(json.contains("\"track_title\":\"Song\""));
+        assert!(json.contains("\"track_artist\":null"));
+        assert!(json.contains("\"file_path\":\"/music/song.flac\""));
+    }
 }

@@ -61,7 +61,7 @@ async function loadPlaylists() {
 
       // Play button outside details/summary for accessibility
       const playBtn = document.createElement('button');
-      playBtn.textContent = '▶ Play';
+      playBtn.textContent = '▶';
       playBtn.className = 'playlist-play-button';
       playBtn.addEventListener('click', () => {
         playPlaylist(playlist.index);
@@ -299,8 +299,28 @@ function renderState(state) {
   let statusText = `${symbol}`;
 
   if (state.mode === "Playing" || state.mode === "Paused") {
-    if (typeof state.source_name === "string") {
-      statusText += ` ${state.source_name}`;
+    if (state.source_info) {
+      if (state.source_info.Stream) {
+        statusText += ` ${escapeHtml(state.source_info.Stream.stream_name)}`;
+      } else if (state.source_info.Playlist) {
+        const info = state.source_info.Playlist;
+        if (info.track_title) {
+          statusText += ` ${escapeHtml(info.track_title)}`;
+          if (info.artist) {
+            statusText += ` - ${escapeHtml(info.artist)}`;
+          }
+          statusText += ` (${escapeHtml(info.playlist_name)})`;
+        } else {
+          statusText += ` ${escapeHtml(info.playlist_name)}`;
+        }
+      } else if (state.source_info.Queue) {
+        const info = state.source_info.Queue;
+        statusText += ` ${escapeHtml(info.track_title)}`;
+        if (info.artist) {
+          statusText += ` - ${escapeHtml(info.artist)}`;
+        }
+        statusText += ` (Queue)`;
+      }
     }
   } else {
     statusText += ` Stopped`;

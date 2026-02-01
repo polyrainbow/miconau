@@ -130,4 +130,29 @@ mod tests {
 
         assert_eq!(get_source_index(36, 2).unwrap(), 7); // Higher C
     }
+
+    #[test]
+    fn get_source_index_boundary_cases() {
+        // Start of keyboard (octave 0)
+        assert_eq!(get_source_index(0, 0).unwrap(), 0); // C0
+        assert_eq!(get_source_index(2, 0).unwrap(), 1); // D0
+        
+        // Crossing octave boundary
+        assert_eq!(get_source_index(23, 1).unwrap(), 6); // B1 (7th white key in octave 1)
+        assert_eq!(get_source_index(24, 1).unwrap(), 7); // C2 (1st white key in octave 2)
+        
+        // High octave values
+        assert_eq!(get_source_index(60, 5).unwrap(), 0); // C5 with offset 5
+        assert_eq!(get_source_index(72, 5).unwrap(), 7); // C6 with offset 5
+    }
+
+    #[test]
+    fn get_source_index_returns_none_for_black_keys() {
+        // All black keys should return None
+        assert!(get_source_index(1, 0).is_none());   // C#
+        assert!(get_source_index(3, 0).is_none());   // D#
+        assert!(get_source_index(6, 0).is_none());   // F#
+        assert!(get_source_index(8, 0).is_none());   // G#
+        assert!(get_source_index(10, 0).is_none());  // A#
+    }
 }
