@@ -443,10 +443,6 @@ impl Player {
         self.notify_queue_updated();
     }
 
-    pub fn get_queue(&self) -> Vec<QueueItem> {
-        self.queue.clone()
-    }
-
     fn notify_queue_updated(&self) {
         match self.event_transmitter.send(AppEvent::QueueUpdated { queue: self.queue.clone() }) {
             Ok(_) => println!("Queue updated notification sent"),
