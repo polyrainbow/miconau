@@ -220,6 +220,10 @@ impl Player {
             self.mpv_controller.set_property("pause", false)
                 .expect("Error setting pause property to false");
 
+            // Clear queue since we replaced the playlist with a single track
+            self.queue.clear();
+            self.notify_queue_updated();
+
             self.set_state(PlayerState {
                 source_info: Some(SourceInfo::Track {
                     track_title,
@@ -257,6 +261,10 @@ impl Player {
             self.mpv_controller.set_property("pause", false)
                 .expect("Error setting pause property to false");
 
+            // Clear queue since we replaced the playlist with a stream
+            self.queue.clear();
+            self.notify_queue_updated();
+
             self.set_state(PlayerState {
                 source_info: Some(SourceInfo::Stream {
                     stream_name: stream.name.clone(),
@@ -288,6 +296,10 @@ impl Player {
                 option: PlaylistAddOptions::Replace,
             }
         ).unwrap();
+
+        // Clear queue since we replaced the playlist
+        self.queue.clear();
+        self.notify_queue_updated();
     }
 
     pub fn play_pause(&mut self) {
@@ -303,6 +315,19 @@ impl Player {
     }
 
     pub fn play_previous_track(&mut self) {
+        // When going back, re-add the current track to the front of the queue
+        if let Some(SourceInfo::Track { track_title, artist, playlist_name }) = &self.state.source_info {
+            if let Ok(current_file) = self.mpv_controller.get_property::<String>("path") {
+                self.queue.insert(0, QueueItem {
+                    playlist_name: playlist_name.clone(),
+                    track_title: track_title.clone(),
+                    track_artist: artist.clone(),
+                    file_path: current_file,
+                });
+                self.notify_queue_updated();
+            }
+        }
+
         let _ = self.mpv_controller.run_command(
             MpvCommand::PlaylistPrev,
         );
@@ -310,14 +335,16 @@ impl Player {
     }
 
     pub fn play_next_track(&mut self) {
-        // If there are items in the queue, play from queue instead
-        if !self.queue.is_empty() {
-            self.play_next_from_queue();
-            return;
-        }
         let _ = self.mpv_controller.run_command(
             MpvCommand::PlaylistNext,
         );
+
+        // Remove the first item from queue since we're advancing
+        if !self.queue.is_empty() {
+            self.queue.remove(0);
+            self.notify_queue_updated();
+        }
+
         self.update_state_from_mpv_playlist();
     }
 
@@ -465,36 +492,6 @@ impl Player {
             Ok(_) => println!("Queue updated notification sent"),
             Err(e) => println!("Error sending queue update: {}", e),
         }
-    }
-
-    pub fn play_next_from_queue(&mut self) -> bool {
-        if self.queue.is_empty() {
-            return false;
-        }
-        let item = self.queue.remove(0);
-        println!("Playing from queue: {}", item.track_title);
-        
-        self.mpv_controller.run_command(
-            MpvCommand::LoadFile {
-                file: item.file_path.clone(),
-                option: PlaylistAddOptions::Replace,
-            }
-        ).unwrap();
-
-        self.mpv_controller.set_property("pause", false)
-            .expect("Error setting pause property to false");
-
-        self.set_state(PlayerState {
-            source_info: Some(SourceInfo::Track {
-                track_title: item.track_title,
-                artist: item.track_artist,
-                playlist_name: item.playlist_name,
-            }),
-            mode: PlayerMode::Playing,
-        });
-
-        self.notify_queue_updated();
-        true
     }
 
     /// Called when mpv advances to the next track in its playlist.
