@@ -621,7 +621,7 @@ mod tests {
             mode: PlayerMode::Playing,
         };
         let json = serde_json::to_string(&state).unwrap();
-        assert!(json.contains("\"Playlist\""));
+        assert!(json.contains("\"Track\""));
         assert!(json.contains("\"track_title\":\"My Song\""));
         assert!(json.contains("\"artist\":\"The Artist\""));
         assert!(json.contains("\"playlist_name\":\"My Playlist\""));
@@ -653,7 +653,7 @@ mod tests {
             mode: PlayerMode::Playing,
         };
         let json = serde_json::to_string(&state).unwrap();
-        assert!(json.contains("\"Queue\""));
+        assert!(json.contains("\"Track\""));
         assert!(json.contains("\"track_title\":\"Queued Song\""));
     }
 

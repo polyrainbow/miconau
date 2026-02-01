@@ -302,8 +302,8 @@ function renderState(state) {
     if (state.source_info) {
       if (state.source_info.Stream) {
         statusText += ` ${escapeHtml(state.source_info.Stream.stream_name)}`;
-      } else if (state.source_info.Playlist) {
-        const info = state.source_info.Playlist;
+      } else if (state.source_info.Track) {
+        const info = state.source_info.Track;
         if (info.track_title) {
           statusText += ` ${escapeHtml(info.track_title)}`;
           if (info.artist) {
@@ -313,13 +313,6 @@ function renderState(state) {
         } else {
           statusText += ` ${escapeHtml(info.playlist_name)}`;
         }
-      } else if (state.source_info.Queue) {
-        const info = state.source_info.Queue;
-        statusText += ` ${escapeHtml(info.track_title)}`;
-        if (info.artist) {
-          statusText += ` - ${escapeHtml(info.artist)}`;
-        }
-        statusText += ` (Queue)`;
       }
     }
   } else {
