@@ -284,6 +284,48 @@ async fn upload_playlist(
     Ok(Json(json!({"success": true})))
 }
 
+async fn download_track(
+    State(server_state): State<ServerState>,
+    Path((playlist_index, track_index)): Path<(usize, usize)>,
+) -> Result<impl IntoResponse, StatusCode> {
+    let player = server_state.player.lock().await;
+    if playlist_index >= player.library.playlists.len() {
+        return Err(StatusCode::NOT_FOUND);
+    }
+    let playlist = &player.library.playlists[playlist_index];
+    if track_index >= playlist.tracks.len() {
+        return Err(StatusCode::NOT_FOUND);
+    }
+    let track = &playlist.tracks[track_index];
+    let file_path = track.filename.clone();
+    let file_name = file_path.file_name()
+        .unwrap_or_default()
+        .to_string_lossy()
+        .to_string();
+    drop(player);
+
+    let bytes = tokio::fs::read(&file_path)
+        .await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+
+    let content_type = if file_name.ends_with(".flac") {
+        "audio/flac"
+    } else if file_name.ends_with(".mp3") {
+        "audio/mpeg"
+    } else {
+        "application/octet-stream"
+    };
+
+    let mut headers = HeaderMap::new();
+    headers.insert(header::CONTENT_TYPE, content_type.parse().unwrap());
+    headers.insert(
+        header::CONTENT_DISPOSITION,
+        format!("attachment; filename=\"{}\"", file_name).parse().unwrap(),
+    );
+
+    Ok((headers, bytes))
+}
+
 async fn get_queue(
     State(server_state): State<ServerState>,
 ) -> Json<Vec<QueueItemInfo>> {
@@ -358,6 +400,7 @@ pub async fn start_server(
         .route("/stream-logo/{name}", get(get_stream_logo))
         .route("/playlists", get(get_playlists))
         .route("/playlist/{index}/tracks", get(get_playlist_tracks))
+        .route("/playlist/{index}/track/{track_index}/download", get(download_track))
         .route("/play/stream/{index}", post(play_stream))
         .route("/play/playlist/{index}", post(play_playlist))
         .route("/play/playlist/{index}/{track_index}", post(play_playlist_track))

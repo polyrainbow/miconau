@@ -326,7 +326,8 @@ h1 {
 }
 
 .track-play-button,
-.track-queue-button {
+.track-queue-button,
+.track-download-button {
     font-size: 0.8rem;
     padding: 0.4rem 0.8rem;
     cursor: pointer;
@@ -358,6 +359,14 @@ h1 {
 
 .track-queue-button:hover {
     background-color: #138496;
+}
+
+.track-download-button {
+    background-color: #6c757d;
+}
+
+.track-download-button:hover {
+    background-color: #5a6268;
 }
 
 .upload-form {

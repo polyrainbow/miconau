@@ -86,6 +86,9 @@ async function loadPlaylists() {
                   <button class="track-queue-button" onclick="addToQueue(${playlist.index}, ${track.index})">
                     <img src="/icons/queue_music.svg" alt="Add to queue" class="queue-icon">
                   </button>
+                  <button class="track-download-button" onclick="downloadTrack(${playlist.index}, ${track.index}, '${escapeHtml(track.title)}')">
+                    <img src="/icons/download.svg" alt="Download" class="download-icon">
+                  </button>
                 </li>`
               ).join('');
             }
@@ -195,6 +198,35 @@ async function addToQueue(playlistIndex, trackIndex) {
     }
   } catch (error) {
     console.error('Error adding to queue:', error);
+  }
+}
+
+async function downloadTrack(playlistIndex, trackIndex, trackTitle) {
+  try {
+    const response = await fetch(`/api/playlist/${playlistIndex}/track/${trackIndex}/download`);
+    if (!response.ok) {
+      console.error('Error downloading track:', await response.text());
+      return;
+    }
+
+    const disposition = response.headers.get('Content-Disposition');
+    let suggestedName = `${trackTitle}.flac`;
+    if (disposition) {
+      const match = disposition.match(/filename="(.+)"/);
+      if (match) suggestedName = match[1];
+    }
+
+    const blob = await response.blob();
+
+    const fileHandle = await window.showSaveFilePicker({
+      suggestedName,
+    });
+    const writable = await fileHandle.createWritable();
+    await writable.write(blob);
+    await writable.close();
+  } catch (error) {
+    if (error.name === 'AbortError') return; // User cancelled
+    console.error('Error downloading track:', error);
   }
 }
 
