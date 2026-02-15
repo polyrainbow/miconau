@@ -1,8 +1,8 @@
-use axum::{extract::{Path, Query, Request, State, Multipart}, http::{header, HeaderMap, StatusCode}, middleware::{self, Next}, response::{sse::{Event, KeepAlive}, Response, Sse}, routing::{get, post}, Json, Router};
+use axum::{extract::{Path, Query, Request, State, Multipart}, http::{header, HeaderMap, HeaderValue, StatusCode}, middleware::{self, Next}, response::{sse::{Event, KeepAlive}, Response, Sse}, routing::{get, post}, Json, Router};
 use serde::{Serialize};
 use tokio::sync::Mutex;
-use tower::ServiceBuilder;
-use tower_http::services::ServeDir;
+use tower::{ServiceBuilder, ServiceExt};
+use tower_http::services::{ServeDir, ServeFile};
 use std::{env::current_exe, path::PathBuf, sync::{Arc}};
 use crate::{library::Stream as AudioStream, player::{Player, PlayerState}};
 use std::error::Error;
@@ -343,6 +343,65 @@ async fn upload_playlist(
     Ok(Json(json!({"success": true})))
 }
 
+async fn download_track(
+    State(server_state): State<ServerState>,
+    Path((playlist_index, track_index)): Path<(usize, usize)>,
+    request: Request,
+) -> Result<Response, StatusCode> {
+    // Take only the path from the library, so the player lock is not held
+    // while the file is sent.
+    let file_path = {
+        let player = server_state.player.lock().await;
+        player.library.playlists
+            .get(playlist_index)
+            .and_then(|playlist| playlist.tracks.get(track_index))
+            .ok_or(StatusCode::NOT_FOUND)?
+            .filename
+            .clone()
+    };
+    let file_name = file_path.file_name()
+        .unwrap_or_default()
+        .to_string_lossy()
+        .to_string();
+
+    // ServeFile streams the file instead of reading it into memory, and
+    // derives the content type from the extension.
+    let mut response = ServeFile::new(&file_path)
+        .oneshot(request)
+        .await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
+        .into_response();
+    if response.status().is_success() {
+        response.headers_mut().insert(
+            header::CONTENT_DISPOSITION,
+            content_disposition(&file_name),
+        );
+    }
+    Ok(response)
+}
+
+/// An attachment header for `file_name`. Header values must be visible ASCII,
+/// so the name goes in percent-encoded as `filename*` (RFC 6266), with an
+/// ASCII-only `filename` alongside for clients that don't read that.
+fn content_disposition(file_name: &str) -> HeaderValue {
+    let fallback: String = file_name.chars()
+        .map(|c| if (c.is_ascii_graphic() && c != '"' && c != '\\') || c == ' ' { c } else { '_' })
+        .collect();
+    let mut encoded = String::new();
+    for byte in file_name.bytes() {
+        if byte.is_ascii_alphanumeric() || b"!#$&+-.^_`|~".contains(&byte) {
+            encoded.push(byte as char);
+        } else {
+            encoded.push_str(&format!("%{:02X}", byte));
+        }
+    }
+    HeaderValue::from_str(&format!(
+        "attachment; filename=\"{}\"; filename*=UTF-8''{}",
+        fallback, encoded,
+    ))
+        .expect("only visible ASCII is left in the header")
+}
+
 async fn get_queue(
     State(server_state): State<ServerState>,
 ) -> Json<Vec<QueueItemInfo>> {
@@ -418,6 +477,7 @@ pub async fn start_server(
         .route("/playlists", get(get_playlists))
         .route("/playlist/{index}/tracks", get(get_playlist_tracks))
         .route("/playlist/{index}/cover", get(get_playlist_cover))
+        .route("/playlist/{index}/track/{track_index}/download", get(download_track))
         .route("/play/stream/{index}", post(play_stream))
         .route("/play/playlist/{index}", post(play_playlist))
         .route("/play/playlist/{index}/{track_index}", post(play_playlist_track))
@@ -449,4 +509,26 @@ pub async fn start_server(
     let listener = tokio::net::TcpListener::bind(address).await?;
     axum::serve(listener, app).await?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn content_disposition_keeps_plain_names() {
+        assert_eq!(
+            content_disposition("01 Song.flac"),
+            "attachment; filename=\"01 Song.flac\"; filename*=UTF-8''01%20Song.flac",
+        );
+    }
+
+    #[test]
+    fn content_disposition_encodes_non_ascii_and_quotes() {
+        assert_eq!(
+            content_disposition("Sigur Rós \"live\".mp3"),
+            "attachment; filename=\"Sigur R_s _live_.mp3\"; \
+             filename*=UTF-8''Sigur%20R%C3%B3s%20%22live%22.mp3",
+        );
+    }
 }

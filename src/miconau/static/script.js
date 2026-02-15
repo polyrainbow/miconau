@@ -88,6 +88,8 @@ function createPlaylistRow(playlist) {
     const trackIndex = Number(button.dataset.trackIndex);
     if (button.classList.contains('track-play-button')) {
       playPlaylistTrack(playlistWrapper.playlistIndex, trackIndex);
+    } else if (button.classList.contains('track-download-button')) {
+      downloadTrack(playlistWrapper.playlistIndex, trackIndex);
     } else {
       addToQueue(playlistWrapper.playlistIndex, trackIndex);
     }
@@ -121,6 +123,9 @@ function createPlaylistRow(playlist) {
               </button>
               <button class="track-queue-button" data-track-index="${track.index}">
                 <img src="/icons/queue_music.svg" alt="Add to queue" class="queue-icon">
+              </button>
+              <button class="track-download-button" data-track-index="${track.index}">
+                <img src="/icons/download.svg" alt="Download" class="download-icon">
               </button>
             </li>`
           ).join('');
@@ -282,6 +287,16 @@ async function addToQueue(playlistIndex, trackIndex) {
   } catch (error) {
     console.error('Error adding to queue:', error);
   }
+}
+
+// A plain download link, so the browser streams the file to disk and takes
+// the filename from the server's Content-Disposition. Built on click because
+// the playlist index can shift while the library is still loading.
+function downloadTrack(playlistIndex, trackIndex) {
+  const link = document.createElement('a');
+  link.href = `/api/playlist/${playlistIndex}/track/${trackIndex}/download`;
+  link.download = '';
+  link.click();
 }
 
 async function removeFromQueue(index) {
