@@ -657,8 +657,9 @@ dependencies = [
 
 [[package]]
 name = "mpvipc"
-version = "1.3.0"
-source = "git+https://gitlab.com/szimmer/mpvipc.git?branch=Handle-negative-values-gracefully#5915950921e63c7ccf59fa7fd09049b09111fd5f"
+version = "1.3.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8e8cf337ff559363c2bfe93b24ad416515cc9e087768ea9f3f89e6111efa575a"
 dependencies = [
  "log",
  "serde_json",
