@@ -10,7 +10,7 @@ A MIDI-controlled audio player: white keys play albums/streams, black keys are t
 
 ```bash
 cargo build
-cargo test                                   # 41 unit tests, all inline #[cfg(test)] modules
+cargo test                                   # 43 unit tests, all inline #[cfg(test)] modules
 cargo test library::tests::skips_hidden_files_and_folders   # single test
 cargo test library::                         # one module's tests
 cargo run --bin miconau -- --library-folder <lib> --start-octave 4 \
