@@ -141,6 +141,15 @@ h1 {
     margin: 0;
 }
 
+.playlist-cover {
+    width: 40px;
+    height: 40px;
+    object-fit: cover;
+    border-radius: 4px;
+    margin-right: 10px;
+    flex-shrink: 0;
+}
+
 .playlist-title {
     flex-grow: 1;
     overflow: hidden;

@@ -25,6 +25,7 @@ struct StreamInfo {
 struct PlaylistInfo {
     name: String,
     index: usize,
+    has_cover: bool,
 }
 
 #[derive(Serialize)]
@@ -126,6 +127,7 @@ async fn get_playlists(
         .map(|(index, playlist)| PlaylistInfo {
             name: playlist.title.clone(),
             index,
+            has_cover: playlist.cover_art.is_some(),
         })
         .collect();
     Json(playlists)
@@ -158,6 +160,22 @@ async fn get_playlist_tracks(
         })
         .collect();
     Ok(Json(tracks))
+}
+
+async fn get_playlist_cover(
+    State(server_state): State<ServerState>,
+    Path(index): Path<usize>,
+) -> Result<impl IntoResponse, StatusCode> {
+    let player = server_state.player.lock().await;
+    let playlist = player.library.playlists.get(index).ok_or(StatusCode::NOT_FOUND)?;
+    match (&playlist.cover_art, &playlist.cover_art_mime) {
+        (Some(data), Some(mime)) => {
+            let mut headers = HeaderMap::new();
+            headers.insert(header::CONTENT_TYPE, mime.parse().unwrap());
+            Ok((headers, data.clone()))
+        }
+        _ => Err(StatusCode::NOT_FOUND),
+    }
 }
 
 async fn get_state(
@@ -358,6 +376,7 @@ pub async fn start_server(
         .route("/stream-logo/{name}", get(get_stream_logo))
         .route("/playlists", get(get_playlists))
         .route("/playlist/{index}/tracks", get(get_playlist_tracks))
+        .route("/playlist/{index}/cover", get(get_playlist_cover))
         .route("/play/stream/{index}", post(play_stream))
         .route("/play/playlist/{index}", post(play_playlist))
         .route("/play/playlist/{index}/{track_index}", post(play_playlist_track))

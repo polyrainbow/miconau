@@ -25,9 +25,29 @@ fn read_track_metadata(path: &PathBuf) -> (Option<String>, Option<String>) {
     }
 }
 
+fn read_cover_art(path: &PathBuf) -> Option<(Vec<u8>, String)> {
+    match Probe::open(path).and_then(|p| p.read()) {
+        Ok(tagged_file) => {
+            if let Some(tag) = tagged_file.primary_tag().or_else(|| tagged_file.first_tag()) {
+                if let Some(picture) = tag.pictures().first() {
+                    let mime = picture
+                        .mime_type()
+                        .map(|m| m.to_string())
+                        .unwrap_or_else(|| "image/jpeg".to_string());
+                    return Some((picture.data().to_vec(), mime));
+                }
+            }
+            None
+        }
+        Err(_) => None,
+    }
+}
+
 pub struct Playlist {
     pub title: String,
     pub tracks: Vec<Track>,
+    pub cover_art: Option<Vec<u8>>,
+    pub cover_art_mime: Option<String>,
 }
 
 pub struct Stream {
@@ -65,6 +85,8 @@ impl Library {
                         .into_string()
                         .unwrap(),
                     tracks: Vec::new(),
+                    cover_art: None,
+                    cover_art_mime: None,
                 };
 
                 let paths_in_album = fs::read_dir(root_dir_entry.path()).unwrap();
@@ -104,6 +126,13 @@ impl Library {
                 }
 
                 album.tracks.sort_by_key(|a| a.filename.clone());
+
+                if let Some(first_track) = album.tracks.first() {
+                    if let Some((data, mime)) = read_cover_art(&first_track.filename) {
+                        album.cover_art = Some(data);
+                        album.cover_art_mime = Some(mime);
+                    }
+                }
 
                 // don't push empty playlists to the library
                 if album.tracks.len() > 0 {

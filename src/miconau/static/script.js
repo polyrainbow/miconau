@@ -38,10 +38,19 @@ async function loadPlaylists() {
       const summary = document.createElement('summary');
       summary.className = 'playlist-summary';
       
+      if (playlist.has_cover) {
+        const coverImg = document.createElement('img');
+        coverImg.src = `/api/playlist/${playlist.index}/cover`;
+        coverImg.alt = '';
+        coverImg.className = 'playlist-cover';
+        coverImg.loading = 'lazy';
+        summary.appendChild(coverImg);
+      }
+
       const titleSpan = document.createElement('span');
       titleSpan.textContent = playlist.name;
       titleSpan.className = 'playlist-title';
-      
+
       summary.appendChild(titleSpan);
       details.appendChild(summary);
 
