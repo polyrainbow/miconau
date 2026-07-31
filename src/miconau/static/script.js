@@ -340,6 +340,9 @@ function connectToEvents() {
     if (data.type === 'playerState') {
       renderState(data);
     } else if (data.type === 'libraryUpdated') {
+      // Sent repeatedly while a scan fills the library, so both lists grow
+      // as folders are read.
+      loadStreams();
       loadPlaylists();
     } else if (data.type === 'queueUpdated') {
       renderQueue(data.queue);

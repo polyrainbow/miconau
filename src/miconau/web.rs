@@ -294,9 +294,16 @@ async fn upload_playlist(
             .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Error writing file: {}", e)))?;
     }
 
-    // Reload library
+    // Reload library. The scan is blocking and can take minutes on a large
+    // library, so it must not run on a runtime thread or hold the player lock.
+    let library = tokio::task::spawn_blocking(move || {
+        crate::library::Library::new(library_folder)
+    })
+        .await
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Error scanning library: {}", e)))?;
+
     let mut player = server_state.player.lock().await;
-    player.library = crate::library::Library::new(library_folder);
+    player.library = library;
     player.notify_library_updated();
 
     Ok(Json(json!({"success": true})))

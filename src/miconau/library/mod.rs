@@ -1,9 +1,53 @@
 use std::{
     fs,
     path::{Path, PathBuf},
+    time::{Duration, Instant},
 };
 use lofty::prelude::*;
 use lofty::probe::Probe;
+
+/// How often the scan reports that it is still alive while working through a
+/// single folder.
+const HEARTBEAT_INTERVAL: Duration = Duration::from_secs(5);
+
+/// Keeps track of how far the scan has got, so a slow library (a big
+/// collection on an external drive takes minutes) doesn't look like a hang.
+struct ScanProgress {
+    started: Instant,
+    last_heartbeat: Instant,
+    folders: usize,
+    tracks: usize,
+    playlists: usize,
+}
+
+impl ScanProgress {
+    fn new() -> ScanProgress {
+        let now = Instant::now();
+        ScanProgress {
+            started: now,
+            last_heartbeat: now,
+            folders: 0,
+            tracks: 0,
+            playlists: 0,
+        }
+    }
+
+    /// Prints at most one line per HEARTBEAT_INTERVAL. Called per track, so
+    /// even a folder with thousands of files keeps showing movement.
+    fn heartbeat(&mut self, current: &Path) {
+        if self.last_heartbeat.elapsed() < HEARTBEAT_INTERVAL {
+            return;
+        }
+        self.last_heartbeat = Instant::now();
+        println!(
+            "Still scanning after {}s: {} folders, {} tracks. Currently in {:?}",
+            self.started.elapsed().as_secs(),
+            self.folders,
+            self.tracks,
+            current,
+        );
+    }
+}
 
 pub struct Track {
     pub filename: PathBuf,
@@ -58,14 +102,18 @@ fn playlist_title(dir: &Path, root: &Path) -> String {
     }
 }
 
-/// Walks `dir` and all of its subfolders, adding every folder that directly
-/// contains audio files as a playlist.
+/// Walks `dir` and all of its subfolders, handing every folder that directly
+/// contains audio files to `on_playlist` as a playlist.
 fn scan_folder(
     dir: &Path,
     root: &Path,
     allowed_extensions: &[&str],
-    playlists: &mut Vec<Playlist>,
+    on_playlist: &mut dyn FnMut(Playlist),
+    progress: &mut ScanProgress,
 ) {
+    progress.folders += 1;
+    progress.heartbeat(dir);
+
     let entries = match fs::read_dir(dir) {
         Ok(entries) => entries,
         Err(error) => {
@@ -102,6 +150,8 @@ fn scan_folder(
                 artist,
                 title,
             });
+            progress.tracks += 1;
+            progress.heartbeat(dir);
         }
     }
 
@@ -122,13 +172,111 @@ fn scan_folder(
             }
         }
 
-        playlists.push(album);
+        println!("Playlist found: {} ({} tracks)", album.title, album.tracks.len());
+        progress.playlists += 1;
+        on_playlist(album);
     }
 
     subfolders.sort();
     for subfolder in subfolders {
-        scan_folder(&subfolder, root, allowed_extensions, playlists);
+        scan_folder(&subfolder, root, allowed_extensions, on_playlist, progress);
     }
+}
+
+/// Walks the library folder, handing every playlist to `on_playlist` the
+/// moment it is found. Lets callers fill a library progressively instead of
+/// waiting for the whole (potentially very slow) scan to finish.
+pub fn scan_playlists(library_folder: &str, on_playlist: &mut dyn FnMut(Playlist)) {
+    let allowed_extensions = vec!["mp3", "flac"];
+    let root = PathBuf::from(library_folder);
+
+    println!("Scanning library at {}...", library_folder);
+    let mut progress = ScanProgress::new();
+    scan_folder(&root, &root, &allowed_extensions, on_playlist, &mut progress);
+
+    println!(
+        "Scan finished in {:.1}s: {} playlists, {} tracks in {} folders.",
+        progress.started.elapsed().as_secs_f32(),
+        progress.playlists,
+        progress.tracks,
+        progress.folders,
+    );
+}
+
+/// Reads the streams from `streams.txt` in the library root. Cheap compared to
+/// the folder scan, so it can be loaded up front. Streams occupy the lowest
+/// white keys, so loading them first keeps the playlist keys from shifting
+/// once the scan starts.
+pub fn read_streams(library_folder: &str) -> Vec<Stream> {
+    let mut streams: Vec<Stream> = Vec::new();
+
+    let streams_file = PathBuf::from(library_folder).join("streams.txt");
+    if !streams_file.is_file() {
+        println!("No streams file found.");
+        return streams;
+    }
+    println!("Streams file found");
+
+    let file_content = match fs::read_to_string(&streams_file) {
+        Ok(content) => content,
+        Err(error) => {
+            println!("Could not read {:?}: {}", streams_file, error);
+            return streams;
+        }
+    };
+
+    // Split the content by double newlines to get blocks
+    let stream_blocks = file_content.split("\n\n");
+
+    for block in stream_blocks {
+        let lines: Vec<&str> = block.trim().lines().collect();
+
+        // Each block must have at least name and URL
+        if lines.len() >= 2 {
+            let name = lines[0].trim();
+            let url = lines[1].trim();
+
+            // Optional logo filename
+            let logo_svg = if lines.len() >= 3 {
+                let filename = lines[2].trim().to_string();
+                let filepath = PathBuf::from(
+                    format!("{}/{}/{}", library_folder, "logos", filename),
+                );
+                println!("Logo file path: {:?}", filepath);
+                let svg = fs::read_to_string(filepath);
+                match svg {
+                    Ok(svg_content) => Some(svg_content),
+                    Err(_) => {
+                        println!("Error reading logo file: {}", filename);
+                        None
+                    }
+                }
+            } else {
+                None
+            };
+
+            streams.push(Stream {
+                name: name.to_string(),
+                url: url.to_string(),
+                logo_svg: logo_svg.clone(),
+            });
+
+            println!(
+                "Stream {} found: {}, Logo: {}",
+                streams.len(),
+                name,
+                logo_svg.is_some(),
+            );
+        }
+    }
+
+    streams
+}
+
+/// Sort key for playlists. Also used to keep the list ordered while a
+/// background scan is still filling it.
+fn playlist_sort_key(title: &str) -> String {
+    title.to_lowercase()
 }
 
 pub struct Playlist {
@@ -151,97 +299,48 @@ pub struct Library {
 }
 
 impl Library {
-    pub fn new(library_folder: String) -> Library {
-        let allowed_extensions = vec!["mp3", "flac"];
-        let mut streams_file_found = false;
-        let mut library = Library {
-            folder: library_folder.clone(),
+    /// An unscanned library, used while the real scan runs in the background.
+    pub fn empty(library_folder: String) -> Library {
+        Library {
+            folder: library_folder,
             playlists: Vec::new(),
             streams: Vec::new(),
-        };
-        let root = PathBuf::from(&library_folder);
-        scan_folder(
-            &root,
-            &root,
-            &allowed_extensions,
-            &mut library.playlists,
-        );
-
-        let paths = fs::read_dir(&library_folder).unwrap();
-        for path_result in paths {
-            let root_dir_entry = path_result.unwrap();
-            let metadata = fs::metadata(root_dir_entry.path()).unwrap();
-
-            if metadata.is_file() && root_dir_entry.file_name() == "streams.txt" {
-                streams_file_found = true;
-                println!("Streams file found");
-                let file_content = fs::read_to_string(root_dir_entry.path()).unwrap();
-                
-                // Split the content by double newlines to get blocks
-                let stream_blocks = file_content.split("\n\n");
-                
-                for block in stream_blocks {
-                    let lines: Vec<&str> = block.trim().lines().collect();
-                    
-                    // Skip empty blocks
-                    if lines.is_empty() {
-                        continue;
-                    }
-                    
-                    // Each block must have at least name and URL
-                    if lines.len() >= 2 {
-                        let name = lines[0].trim();
-                        let url = lines[1].trim();
-                        
-                        // Optional logo filename
-                        let logo_svg = if lines.len() >= 3 {
-                            let filename = lines[2].trim().to_string();
-                            let filepath = PathBuf::from(
-                                format!("{}/{}/{}", library.folder, "logos", filename),
-                            );
-                            println!("Logo file path: {:?}", filepath);
-                            let svg = fs::read_to_string(filepath);
-                            match svg {
-                                Ok(svg_content) => Some(svg_content),
-                                Err(_) => {
-                                    println!("Error reading logo file: {}", filename);
-                                    None
-                                }
-                            }
-                        } else {
-                            None
-                        };
-
-
-                        
-                        library.streams.push(Stream {
-                            name: name.to_string(),
-                            url: url.to_string(),
-                            logo_svg: logo_svg.clone(),
-                        });
-                        
-                        println!(
-                            "Stream {} found: {}, Logo: {}",
-                            library.streams.len(),
-                            name,
-                            logo_svg.is_some(),
-                        );
-                    }
-                }
-                    
-            }
         }
+    }
 
-        if !streams_file_found {
-            println!("No streams file found.");
-        }
+    /// Inserts a playlist at its sorted position, so the library stays ordered
+    /// even while a background scan is still adding to it.
+    pub fn insert_playlist(&mut self, playlist: Playlist) {
+        let key = playlist_sort_key(&playlist.title);
+        let position = self
+            .playlists
+            .partition_point(|existing| playlist_sort_key(&existing.title) <= key);
+        self.playlists.insert(position, playlist);
+    }
 
-        library.playlists.sort_by_key(|a| a.title.clone().to_lowercase());
-        println!("Found {} playlists.", library.playlists.len());
-        for (i, album) in library.playlists.iter().enumerate() {
+    /// Logs the playlists with the index each one is reachable at, both on the
+    /// keyboard and in the web API.
+    pub fn log_playlists(&self) {
+        for (i, album) in self.playlists.iter().enumerate() {
             println!("{}: {} ({} tracks)", i + 1, album.title, album.tracks.len());
         }
-        return library;
+    }
+
+    /// Scans the whole library at once. Blocks until the scan is done, so
+    /// callers that need to stay responsive should use `scan_playlists`
+    /// together with `insert_playlist` instead.
+    pub fn new(library_folder: String) -> Library {
+        let mut library = Library::empty(library_folder.clone());
+        library.streams = read_streams(&library_folder);
+
+        let mut playlists: Vec<Playlist> = Vec::new();
+        scan_playlists(&library_folder, &mut |playlist| playlists.push(playlist));
+        for playlist in playlists {
+            library.insert_playlist(playlist);
+        }
+
+        library.log_playlists();
+        library
     }
 }
 
@@ -436,6 +535,59 @@ mod tests {
             titles,
             vec![title(&["Artist A", "Live"]), title(&["Artist B", "Live"])]
         );
+    }
+
+    fn empty_playlist(title: &str) -> Playlist {
+        Playlist {
+            title: title.to_string(),
+            tracks: Vec::new(),
+            cover_art: None,
+            cover_art_mime: None,
+        }
+    }
+
+    #[test]
+    fn inserted_playlists_stay_sorted() {
+        let mut library = Library::empty("/music".to_string());
+        for title in ["Zebra", "apple", "Middle", "Apricot"] {
+            library.insert_playlist(empty_playlist(title));
+        }
+
+        assert_eq!(
+            library
+                .playlists
+                .iter()
+                .map(|playlist| playlist.title.clone())
+                .collect::<Vec<String>>(),
+            vec!["apple", "Apricot", "Middle", "Zebra"]
+        );
+    }
+
+    /// The progressive scan main uses must end up with exactly the library a
+    /// blocking `Library::new` would have produced.
+    #[test]
+    fn scanning_progressively_yields_the_same_playlists_as_a_full_scan() {
+        let temp = TempLibrary::new("progressive");
+        temp.file("Zebra/01.mp3", "")
+            .file("apple/01.mp3", "")
+            .file("Artist/01.mp3", "")
+            .file("Artist/Album/01.mp3", "");
+
+        let folder = temp.path.to_str().unwrap().to_string();
+        let mut progressive = Library::empty(folder.clone());
+        scan_playlists(&folder, &mut |playlist| {
+            progressive.insert_playlist(playlist)
+        });
+
+        assert_eq!(
+            progressive
+                .playlists
+                .iter()
+                .map(|playlist| playlist.title.clone())
+                .collect::<Vec<String>>(),
+            temp.playlist_titles()
+        );
+        assert_eq!(progressive.playlists.len(), 4);
     }
 
     #[test]
