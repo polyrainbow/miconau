@@ -127,7 +127,7 @@ async fn get_playlists(
         .map(|(index, playlist)| PlaylistInfo {
             name: playlist.title.clone(),
             index,
-            has_cover: playlist.cover_art.is_some(),
+            has_cover: playlist.cover_source.is_some(),
         })
         .collect();
     Json(playlists)
@@ -166,16 +166,39 @@ async fn get_playlist_cover(
     State(server_state): State<ServerState>,
     Path(index): Path<usize>,
 ) -> Result<impl IntoResponse, StatusCode> {
-    let player = server_state.player.lock().await;
-    let playlist = player.library.playlists.get(index).ok_or(StatusCode::NOT_FOUND)?;
-    match (&playlist.cover_art, &playlist.cover_art_mime) {
-        (Some(data), Some(mime)) => {
-            let mut headers = HeaderMap::new();
-            headers.insert(header::CONTENT_TYPE, mime.parse().unwrap());
-            Ok((headers, data.clone()))
-        }
-        _ => Err(StatusCode::NOT_FOUND),
-    }
+    // Take only the path from the library, so the player lock is not held
+    // while the file is read.
+    let cover_source = {
+        let player = server_state.player.lock().await;
+        player.library.playlists
+            .get(index)
+            .ok_or(StatusCode::NOT_FOUND)?
+            .cover_source
+            .clone()
+            .ok_or(StatusCode::NOT_FOUND)?
+    };
+
+    // Reading the cover hits the disk, which is slow for a library on an
+    // external drive, so keep it off the runtime threads.
+    let (data, mime) = tokio::task::spawn_blocking(move || {
+        crate::library::read_cover_art(&cover_source)
+    })
+        .await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
+        .ok_or(StatusCode::NOT_FOUND)?;
+
+    let mut headers = HeaderMap::new();
+    headers.insert(
+        header::CONTENT_TYPE,
+        mime.parse().map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?,
+    );
+    // Covers now come off the disk on every request and the playlist list is
+    // re-rendered often, so let the browser hold on to them.
+    headers.insert(
+        header::CACHE_CONTROL,
+        "private, max-age=3600".parse().unwrap(),
+    );
+    Ok((headers, data))
 }
 
 async fn get_state(

@@ -53,24 +53,41 @@ pub struct Track {
     pub filename: PathBuf,
     pub artist: Option<String>,
     pub title: Option<String>,
+    /// Whether the file has embedded artwork. The image itself is not kept:
+    /// a few thousand albums with embedded covers add up to gigabytes, so
+    /// covers are read from the file again when they are served.
+    pub has_cover_art: bool,
 }
 
-fn read_track_metadata(path: &PathBuf) -> (Option<String>, Option<String>) {
-    match Probe::open(path).and_then(|p| p.read()) {
+/// Reads the tags of one audio file. The scan already opens every file here,
+/// so noting whether it has artwork costs nothing extra and saves reopening
+/// the first track of every playlist.
+fn read_track(path: PathBuf) -> Track {
+    let (artist, title, has_cover_art) = match Probe::open(&path).and_then(|p| p.read()) {
         Ok(tagged_file) => {
-            if let Some(tag) = tagged_file.primary_tag().or_else(|| tagged_file.first_tag()) {
-                let artist = tag.artist().map(|s| s.to_string());
-                let title = tag.title().map(|s| s.to_string());
-                (artist, title)
-            } else {
-                (None, None)
+            match tagged_file.primary_tag().or_else(|| tagged_file.first_tag()) {
+                Some(tag) => (
+                    tag.artist().map(|s| s.to_string()),
+                    tag.title().map(|s| s.to_string()),
+                    !tag.pictures().is_empty(),
+                ),
+                None => (None, None, false),
             }
         }
-        Err(_) => (None, None)
+        Err(_) => (None, None, false),
+    };
+
+    Track {
+        filename: path,
+        artist,
+        title,
+        has_cover_art,
     }
 }
 
-fn read_cover_art(path: &PathBuf) -> Option<(Vec<u8>, String)> {
+/// Reads the embedded cover of an audio file. Called when a cover is actually
+/// requested rather than during the scan, so covers never accumulate in memory.
+pub fn read_cover_art(path: &Path) -> Option<(Vec<u8>, String)> {
     match Probe::open(path).and_then(|p| p.read()) {
         Ok(tagged_file) => {
             if let Some(tag) = tagged_file.primary_tag().or_else(|| tagged_file.first_tag()) {
@@ -144,12 +161,7 @@ fn scan_folder(
             .unwrap_or(false);
 
         if is_audio_file {
-            let (artist, title) = read_track_metadata(&path);
-            tracks.push(Track {
-                filename: path,
-                artist,
-                title,
-            });
+            tracks.push(read_track(path));
             progress.tracks += 1;
             progress.heartbeat(dir);
         }
@@ -158,19 +170,18 @@ fn scan_folder(
     if !tracks.is_empty() {
         tracks.sort_by_key(|a| a.filename.clone());
 
-        let mut album = Playlist {
+        // The first track's artwork represents the playlist. Only the path is
+        // kept; the image is read when it is served.
+        let cover_source = tracks
+            .first()
+            .filter(|track| track.has_cover_art)
+            .map(|track| track.filename.clone());
+
+        let album = Playlist {
             title: playlist_title(dir, root),
             tracks,
-            cover_art: None,
-            cover_art_mime: None,
+            cover_source,
         };
-
-        if let Some(first_track) = album.tracks.first() {
-            if let Some((data, mime)) = read_cover_art(&first_track.filename) {
-                album.cover_art = Some(data);
-                album.cover_art_mime = Some(mime);
-            }
-        }
 
         println!("Playlist found: {} ({} tracks)", album.title, album.tracks.len());
         progress.playlists += 1;
@@ -282,8 +293,10 @@ fn playlist_sort_key(title: &str) -> String {
 pub struct Playlist {
     pub title: String,
     pub tracks: Vec<Track>,
-    pub cover_art: Option<Vec<u8>>,
-    pub cover_art_mime: Option<String>,
+    /// The audio file whose embedded cover represents this playlist, if any.
+    /// Holding the path instead of the image keeps a large library's covers
+    /// out of memory.
+    pub cover_source: Option<PathBuf>,
 }
 
 pub struct Stream {
@@ -378,6 +391,15 @@ mod tests {
             fs::create_dir_all(path.parent().unwrap()).unwrap();
             fs::write(path, content).unwrap();
             self
+        }
+
+        /// Creates a file with raw bytes, for content that has to be a valid
+        /// audio file.
+        fn bytes(&self, relative: &str, content: &[u8]) -> PathBuf {
+            let path = self.path.join(relative);
+            fs::create_dir_all(path.parent().unwrap()).unwrap();
+            fs::write(&path, content).unwrap();
+            path
         }
 
         fn scan(&self) -> Library {
@@ -537,12 +559,72 @@ mod tests {
         );
     }
 
+    /// Writes an mp3 with an embedded cover, and returns the picture bytes it
+    /// was given.
+    fn write_mp3_with_cover(library: &TempLibrary, relative: &str) -> Vec<u8> {
+        use lofty::config::WriteOptions;
+        use lofty::picture::{MimeType, Picture, PictureType};
+        use lofty::tag::{Tag, TagType};
+
+        // A run of silent MPEG-1 Layer III frames (128 kbps, 44.1 kHz, so
+        // 417 bytes each). lofty reads audio properties and rejects the file
+        // unless it finds consecutive valid frames.
+        let mut frame = vec![0xFF, 0xFB, 0x90, 0x00];
+        frame.resize(417, 0);
+        let mp3 = frame.repeat(8);
+        let path = library.bytes(relative, &mp3);
+
+        let picture_data = b"not really a jpeg, but never decoded".to_vec();
+        let mut tag = Tag::new(TagType::Id3v2);
+        tag.push_picture(Picture::new_unchecked(
+            PictureType::CoverFront,
+            Some(MimeType::Jpeg),
+            None,
+            picture_data.clone(),
+        ));
+        tag.save_to_path(&path, WriteOptions::default()).unwrap();
+
+        picture_data
+    }
+
+    #[test]
+    fn cover_art_is_referenced_by_path_and_read_on_demand() {
+        let library = TempLibrary::new("cover-art");
+        let picture_data = write_mp3_with_cover(&library, "With Cover/01.mp3");
+        library.file("Without Cover/01.mp3", "");
+
+        let scanned = library.scan();
+        let with_cover = scanned
+            .playlists
+            .iter()
+            .find(|playlist| playlist.title == "With Cover")
+            .unwrap();
+        let without_cover = scanned
+            .playlists
+            .iter()
+            .find(|playlist| playlist.title == "Without Cover")
+            .unwrap();
+
+        // the scan records where the cover is, not the cover itself
+        assert_eq!(
+            with_cover.cover_source,
+            Some(library.path.join("With Cover/01.mp3"))
+        );
+        assert!(with_cover.tracks[0].has_cover_art);
+        assert_eq!(without_cover.cover_source, None);
+        assert!(!without_cover.tracks[0].has_cover_art);
+
+        // and serving it reads the image back out of the file
+        let (data, mime) = read_cover_art(with_cover.cover_source.as_ref().unwrap()).unwrap();
+        assert_eq!(data, picture_data);
+        assert_eq!(mime, "image/jpeg");
+    }
+
     fn empty_playlist(title: &str) -> Playlist {
         Playlist {
             title: title.to_string(),
             tracks: Vec::new(),
-            cover_art: None,
-            cover_art_mime: None,
+            cover_source: None,
         }
     }
 
@@ -613,3 +695,4 @@ mod tests {
         );
     }
 }
+
