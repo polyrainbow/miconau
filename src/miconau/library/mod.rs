@@ -1,5 +1,6 @@
 use std::{
-    fs, path::PathBuf
+    fs,
+    path::{Path, PathBuf},
 };
 use lofty::prelude::*;
 use lofty::probe::Probe;
@@ -43,6 +44,93 @@ fn read_cover_art(path: &PathBuf) -> Option<(Vec<u8>, String)> {
     }
 }
 
+/// Name of the playlist for a folder: its path relative to the library root,
+/// so nested folders stay unique (e.g. "Artist/Album"). The library root
+/// itself falls back to its own folder name.
+fn playlist_title(dir: &Path, root: &Path) -> String {
+    let relative = dir.strip_prefix(root).unwrap_or(dir);
+    if relative.as_os_str().is_empty() {
+        root.file_name()
+            .map(|name| name.to_string_lossy().to_string())
+            .unwrap_or_else(|| root.to_string_lossy().to_string())
+    } else {
+        relative.to_string_lossy().to_string()
+    }
+}
+
+/// Walks `dir` and all of its subfolders, adding every folder that directly
+/// contains audio files as a playlist.
+fn scan_folder(
+    dir: &Path,
+    root: &Path,
+    allowed_extensions: &[&str],
+    playlists: &mut Vec<Playlist>,
+) {
+    let entries = match fs::read_dir(dir) {
+        Ok(entries) => entries,
+        Err(error) => {
+            println!("Could not read folder {:?}: {}", dir, error);
+            return;
+        }
+    };
+
+    let mut tracks: Vec<Track> = Vec::new();
+    let mut subfolders: Vec<PathBuf> = Vec::new();
+
+    for entry in entries.flatten() {
+        let path = entry.path();
+        let filename = entry.file_name().to_string_lossy().to_string();
+        if filename.starts_with(".") {
+            continue;
+        }
+
+        if path.is_dir() {
+            subfolders.push(path);
+            continue;
+        }
+
+        let is_audio_file = path
+            .extension()
+            .and_then(|extension| extension.to_str())
+            .map(|extension| allowed_extensions.contains(&extension.to_lowercase().as_str()))
+            .unwrap_or(false);
+
+        if is_audio_file {
+            let (artist, title) = read_track_metadata(&path);
+            tracks.push(Track {
+                filename: path,
+                artist,
+                title,
+            });
+        }
+    }
+
+    if !tracks.is_empty() {
+        tracks.sort_by_key(|a| a.filename.clone());
+
+        let mut album = Playlist {
+            title: playlist_title(dir, root),
+            tracks,
+            cover_art: None,
+            cover_art_mime: None,
+        };
+
+        if let Some(first_track) = album.tracks.first() {
+            if let Some((data, mime)) = read_cover_art(&first_track.filename) {
+                album.cover_art = Some(data);
+                album.cover_art_mime = Some(mime);
+            }
+        }
+
+        playlists.push(album);
+    }
+
+    subfolders.sort();
+    for subfolder in subfolders {
+        scan_folder(&subfolder, root, allowed_extensions, playlists);
+    }
+}
+
 pub struct Playlist {
     pub title: String,
     pub tracks: Vec<Track>,
@@ -71,74 +159,18 @@ impl Library {
             playlists: Vec::new(),
             streams: Vec::new(),
         };
-        let paths = fs::read_dir(library_folder).unwrap();
+        let root = PathBuf::from(&library_folder);
+        scan_folder(
+            &root,
+            &root,
+            &allowed_extensions,
+            &mut library.playlists,
+        );
+
+        let paths = fs::read_dir(&library_folder).unwrap();
         for path_result in paths {
             let root_dir_entry = path_result.unwrap();
             let metadata = fs::metadata(root_dir_entry.path()).unwrap();
-            if metadata.is_dir() {
-                let mut album = Playlist {
-                    title: root_dir_entry
-                        .path()
-                        .file_name()
-                        .unwrap()
-                        .to_owned()
-                        .into_string()
-                        .unwrap(),
-                    tracks: Vec::new(),
-                    cover_art: None,
-                    cover_art_mime: None,
-                };
-
-                let paths_in_album = fs::read_dir(root_dir_entry.path()).unwrap();
-                for path_result in paths_in_album {
-                    let dir_entry = path_result.unwrap();
-                    let path_buf = dir_entry.path();
-                    let extension_as_path = path_buf.as_path().extension();
-
-                    match extension_as_path {
-                        Some(os_str) => {
-                            let extension_str = os_str.to_str().unwrap();
-                            let attr = fs::metadata(dir_entry.path()).unwrap();
-                            let filename_without_path = path_buf.file_name().unwrap();
-                            let filename_is_valid = !filename_without_path
-                                .to_owned()
-                                .into_string()
-                                .unwrap()
-                                .starts_with(".");
-                            if attr.is_file()
-                                && allowed_extensions.contains(&extension_str)
-                                && filename_is_valid
-                            {
-                                let track_path = dir_entry.path();
-                                let (artist, title) = read_track_metadata(&track_path);
-                                let track = Track {
-                                    filename: track_path,
-                                    artist,
-                                    title,
-                                };
-                                album.tracks.push(track);
-                            }
-                        }
-                        None => {
-                            continue;
-                        }
-                    }
-                }
-
-                album.tracks.sort_by_key(|a| a.filename.clone());
-
-                if let Some(first_track) = album.tracks.first() {
-                    if let Some((data, mime)) = read_cover_art(&first_track.filename) {
-                        album.cover_art = Some(data);
-                        album.cover_art_mime = Some(mime);
-                    }
-                }
-
-                // don't push empty playlists to the library
-                if album.tracks.len() > 0 {
-                    library.playlists.push(album);
-                }
-            }
 
             if metadata.is_file() && root_dir_entry.file_name() == "streams.txt" {
                 streams_file_found = true;
@@ -210,5 +242,222 @@ impl Library {
             println!("{}: {} ({} tracks)", i + 1, album.title, album.tracks.len());
         }
         return library;
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::path::MAIN_SEPARATOR;
+
+    /// A library folder in the system temp dir that deletes itself again when
+    /// the test ends.
+    struct TempLibrary {
+        path: PathBuf,
+    }
+
+    impl TempLibrary {
+        fn new(name: &str) -> TempLibrary {
+            let path = std::env::temp_dir()
+                .join(format!("miconau-test-{}-{}", std::process::id(), name));
+            let _ = fs::remove_dir_all(&path);
+            fs::create_dir_all(&path).unwrap();
+            TempLibrary { path }
+        }
+
+        /// Creates an empty folder, relative to the library root.
+        fn folder(&self, relative: &str) -> &TempLibrary {
+            fs::create_dir_all(self.path.join(relative)).unwrap();
+            self
+        }
+
+        /// Creates a file (and any missing parent folders), relative to the
+        /// library root. The content is irrelevant for scanning, so tracks are
+        /// simply empty files without tags.
+        fn file(&self, relative: &str, content: &str) -> &TempLibrary {
+            let path = self.path.join(relative);
+            fs::create_dir_all(path.parent().unwrap()).unwrap();
+            fs::write(path, content).unwrap();
+            self
+        }
+
+        fn scan(&self) -> Library {
+            Library::new(self.path.to_str().unwrap().to_string())
+        }
+
+        fn playlist_titles(&self) -> Vec<String> {
+            self.scan()
+                .playlists
+                .into_iter()
+                .map(|playlist| playlist.title)
+                .collect()
+        }
+
+        fn name(&self) -> String {
+            self.path.file_name().unwrap().to_string_lossy().to_string()
+        }
+    }
+
+    impl Drop for TempLibrary {
+        fn drop(&mut self) {
+            let _ = fs::remove_dir_all(&self.path);
+        }
+    }
+
+    /// Builds a playlist title from path segments, so expectations don't depend
+    /// on the platform's path separator.
+    fn title(segments: &[&str]) -> String {
+        segments.join(&MAIN_SEPARATOR.to_string())
+    }
+
+    #[test]
+    fn playlist_title_is_relative_to_the_library_root() {
+        let root = PathBuf::from("/music");
+
+        assert_eq!(playlist_title(&root.join("Album"), &root), "Album");
+        assert_eq!(
+            playlist_title(&root.join("Artist").join("Album"), &root),
+            title(&["Artist", "Album"])
+        );
+        // the library root itself falls back to its own folder name
+        assert_eq!(playlist_title(&root, &root), "music");
+    }
+
+    #[test]
+    fn finds_playlists_in_subdirectories() {
+        let library = TempLibrary::new("subdirectories");
+        library
+            .file("Top Album/01.mp3", "")
+            .file("Artist/Album A/01.mp3", "")
+            .file("Artist/Album B/01.mp3", "")
+            .file("Deep/One/Two/Three/01.flac", "");
+
+        assert_eq!(
+            library.playlist_titles(),
+            vec![
+                title(&["Artist", "Album A"]),
+                title(&["Artist", "Album B"]),
+                title(&["Deep", "One", "Two", "Three"]),
+                "Top Album".to_string(),
+            ]
+        );
+    }
+
+    #[test]
+    fn adds_audio_files_in_the_library_root_as_a_playlist() {
+        let library = TempLibrary::new("root-tracks");
+        library.file("01.mp3", "").file("Album/01.mp3", "");
+
+        assert_eq!(
+            library.playlist_titles(),
+            vec!["Album".to_string(), library.name()]
+        );
+    }
+
+    #[test]
+    fn skips_folders_without_audio_files() {
+        let library = TempLibrary::new("no-audio");
+        library
+            .folder("Empty Folder")
+            .file("logos/station.svg", "<svg/>")
+            .file("Artist/notes.txt", "hello")
+            // "Artist" itself holds no audio, only the album below it does
+            .file("Artist/Album/01.mp3", "");
+
+        assert_eq!(
+            library.playlist_titles(),
+            vec![title(&["Artist", "Album"])]
+        );
+    }
+
+    #[test]
+    fn skips_hidden_files_and_folders() {
+        let library = TempLibrary::new("hidden");
+        library
+            .file("Album/01.mp3", "")
+            .file("Album/._02.mp3", "")
+            .file(".hidden/01.mp3", "");
+
+        let playlists = library.scan().playlists;
+        assert_eq!(playlists.len(), 1);
+        assert_eq!(playlists[0].title, "Album");
+        assert_eq!(playlists[0].tracks.len(), 1);
+    }
+
+    #[test]
+    fn matches_extensions_case_insensitively() {
+        let library = TempLibrary::new("extensions");
+        library
+            .file("Album/01.MP3", "")
+            .file("Album/02.Flac", "")
+            .file("Album/03.wav", "")
+            .file("Album/04", "");
+
+        let playlists = library.scan().playlists;
+        assert_eq!(playlists.len(), 1);
+        assert_eq!(
+            playlists[0]
+                .tracks
+                .iter()
+                .map(|track| track.filename.file_name().unwrap().to_string_lossy().to_string())
+                .collect::<Vec<String>>(),
+            vec!["01.MP3".to_string(), "02.Flac".to_string()]
+        );
+    }
+
+    #[test]
+    fn sorts_tracks_by_filename() {
+        let library = TempLibrary::new("track-order");
+        library
+            .file("Album/03.mp3", "")
+            .file("Album/01.mp3", "")
+            .file("Album/02.mp3", "");
+
+        let playlists = library.scan().playlists;
+        assert_eq!(
+            playlists[0]
+                .tracks
+                .iter()
+                .map(|track| track.filename.file_name().unwrap().to_string_lossy().to_string())
+                .collect::<Vec<String>>(),
+            vec!["01.mp3".to_string(), "02.mp3".to_string(), "03.mp3".to_string()]
+        );
+    }
+
+    #[test]
+    fn playlist_titles_are_unique_for_identically_named_subfolders() {
+        let library = TempLibrary::new("duplicate-names");
+        library
+            .file("Artist A/Live/01.mp3", "")
+            .file("Artist B/Live/01.mp3", "");
+
+        let titles = library.playlist_titles();
+        assert_eq!(
+            titles,
+            vec![title(&["Artist A", "Live"]), title(&["Artist B", "Live"])]
+        );
+    }
+
+    #[test]
+    fn reads_streams_from_the_library_root() {
+        let library = TempLibrary::new("streams");
+        library
+            .file("streams.txt", "A Stream\nhttp://example.com/a\n\nB Stream\nhttp://example.com/b")
+            .file("Album/01.mp3", "");
+
+        let scanned = library.scan();
+        assert_eq!(scanned.streams.len(), 2);
+        assert_eq!(scanned.streams[0].name, "A Stream");
+        assert_eq!(scanned.streams[0].url, "http://example.com/a");
+        assert_eq!(scanned.streams[1].name, "B Stream");
+        // the streams file must not turn the root into a playlist
+        assert_eq!(
+            scanned
+                .playlists
+                .into_iter()
+                .map(|playlist| playlist.title)
+                .collect::<Vec<String>>(),
+            vec!["Album".to_string()]
+        );
     }
 }
