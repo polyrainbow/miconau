@@ -112,9 +112,9 @@ impl Player {
         Ok(())
     }
 
-    pub fn play_playlist(&mut self, playlist_index: u8) {
-        if playlist_index < self.library.playlists.len() as u8 {
-            let playlist = self.library.playlists.get(playlist_index as usize).unwrap();
+    pub fn play_playlist(&mut self, playlist_index: usize) {
+        if playlist_index < self.library.playlists.len() {
+            let playlist = self.library.playlists.get(playlist_index).unwrap();
             let playlist_name = playlist.title.clone();
             println!("Playing playlist {}", playlist_name);
             let mut path = self.library.folder.clone();
@@ -187,15 +187,23 @@ impl Player {
 
     pub fn play_playlist_track(
         &mut self,
-        playlist_index: u8,
-        track_index: u8,
+        playlist_index: usize,
+        track_index: usize,
     ) {
-        if playlist_index < self.library.playlists.len() as u8 {
+        // Bounds are checked up front so the reference to the playlist below
+        // does not keep the library borrowed while the error path needs
+        // `&mut self`. A missing playlist has no tracks, so the one check
+        // covers a bad playlist index as well.
+        let track_count = self.library.playlists
+            .get(playlist_index)
+            .map_or(0, |playlist| playlist.tracks.len());
+
+        if track_index < track_count {
             let playlist = self.library.playlists
-                .get(playlist_index as usize).unwrap();
+                .get(playlist_index).unwrap();
             let playlist_name = playlist.title.clone();
             let track = playlist.tracks
-                .get(track_index as usize).unwrap();
+                .get(track_index).unwrap();
             let track_path = &track.filename;
             let track_title = track.title.clone().unwrap_or_else(|| {
                 track_path
@@ -233,7 +241,10 @@ impl Player {
                 mode: PlayerMode::Playing,
             });
         } else {
-            println!("Playlist with index {} not found. Playing error sound.", playlist_index);
+            println!(
+                "Track {} of playlist {} not found. Playing error sound.",
+                track_index, playlist_index,
+            );
             self.play_error();
             self.set_state(PlayerState {
                 source_info: None,
@@ -242,9 +253,9 @@ impl Player {
         }
     }
 
-    pub fn play_stream(&mut self, stream_index: u8) {
-        if stream_index < self.library.streams.len() as u8 {
-            let stream = self.library.streams.get(stream_index as usize).unwrap();
+    pub fn play_stream(&mut self, stream_index: usize) {
+        if stream_index < self.library.streams.len() {
+            let stream = self.library.streams.get(stream_index).unwrap();
             println!("Playing stream {}", &stream.url);
             self.mpv_controller.run_command(
                 MpvCommand::LoadFile {

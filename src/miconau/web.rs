@@ -209,29 +209,29 @@ async fn get_state(
 }
 
 async fn play_stream(
-    Path(index): Path<u64>,
+    Path(index): Path<usize>,
     State(server_state): State<ServerState>,
 ) -> Result<StatusCode, StatusCode> {
     let mut player = server_state.player.lock().await;
-    player.play_stream(index as u8);
+    player.play_stream(index);
     Ok(StatusCode::OK)
 }
 
 async fn play_playlist(
     State(server_state): State<ServerState>,
-    Path(index): Path<u64>,
+    Path(index): Path<usize>,
 ) -> Result<StatusCode, StatusCode> {
     let mut player = server_state.player.lock().await;
-    player.play_playlist(index as u8);
+    player.play_playlist(index);
     Ok(StatusCode::OK)
 }
 
 async fn play_playlist_track(
     State(server_state): State<ServerState>,
-    Path((index, track_index)): Path<(u64, u64)>,
+    Path((index, track_index)): Path<(usize, usize)>,
 ) -> Result<StatusCode, StatusCode> {
     let mut player = server_state.player.lock().await;
-    player.play_playlist_track(index as u8, track_index as u8);
+    player.play_playlist_track(index, track_index);
     Ok(StatusCode::OK)
 }
 

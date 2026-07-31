@@ -29,6 +29,34 @@ pub fn get_source_index(key: u8, start_octave: u8) -> Option<u8> {
 }
 
 
+/// What a source index refers to. Streams occupy the white keys below the
+/// playlists, so a single index addresses both.
+#[derive(Debug, PartialEq)]
+pub enum Source {
+    Stream(usize),
+    Playlist(usize),
+}
+
+/// Resolves a source index against the sizes of the library.
+///
+/// Everything here is `usize` on purpose. The index itself comes from a MIDI
+/// note and would fit in a `u8`, but the library can hold far more than the
+/// 255 sources a `u8` count can express, and truncating the counts made high
+/// indices resolve to the wrong source or to none at all.
+pub fn resolve_source(
+    source_index: usize,
+    n_streams: usize,
+    n_playlists: usize,
+) -> Option<Source> {
+    if source_index < n_streams {
+        Some(Source::Stream(source_index))
+    } else if source_index < n_streams + n_playlists {
+        Some(Source::Playlist(source_index - n_streams))
+    } else {
+        None
+    }
+}
+
 pub fn handle_midi_key_press(received: u8, start_octave: u8, player: &mut Player) {
     if is_white_key(received) {
         let source_index = get_source_index(received, start_octave);
@@ -36,16 +64,20 @@ pub fn handle_midi_key_press(received: u8, start_octave: u8, player: &mut Player
         match source_index {
             Some(source_index) => {
                 println!("Source index: {}", source_index);
-                let n_streams = player.library.streams.len() as u8;
-                let n_playlists = player.library.playlists.len() as u8;
-                if source_index < n_streams {
-                    player.play_stream(source_index);
-                } else if source_index < (n_streams + n_playlists) {
-                    let playlist_index = source_index - n_streams;
-                    player.play_playlist(playlist_index);
-                } else {
-                    println!("Source index out of range. Playing error sound.");
-                    player.play_error();
+                let source = resolve_source(
+                    source_index as usize,
+                    player.library.streams.len(),
+                    player.library.playlists.len(),
+                );
+                match source {
+                    Some(Source::Stream(stream_index)) => player.play_stream(stream_index),
+                    Some(Source::Playlist(playlist_index)) => {
+                        player.play_playlist(playlist_index)
+                    }
+                    None => {
+                        println!("Source index out of range. Playing error sound.");
+                        player.play_error();
+                    }
                 }
             }
             None => {
@@ -144,6 +176,47 @@ mod tests {
         // High octave values
         assert_eq!(get_source_index(60, 5).unwrap(), 0); // C5 with offset 5
         assert_eq!(get_source_index(72, 5).unwrap(), 7); // C6 with offset 5
+    }
+
+    #[test]
+    fn resolve_source_maps_the_low_keys_to_streams() {
+        assert_eq!(resolve_source(0, 3, 10), Some(Source::Stream(0)));
+        assert_eq!(resolve_source(2, 3, 10), Some(Source::Stream(2)));
+        // First key past the streams is the first playlist.
+        assert_eq!(resolve_source(3, 3, 10), Some(Source::Playlist(0)));
+        assert_eq!(resolve_source(12, 3, 10), Some(Source::Playlist(9)));
+        // One past the last playlist.
+        assert_eq!(resolve_source(13, 3, 10), None);
+    }
+
+    #[test]
+    fn resolve_source_handles_a_library_without_streams() {
+        assert_eq!(resolve_source(0, 0, 2), Some(Source::Playlist(0)));
+        assert_eq!(resolve_source(1, 0, 2), Some(Source::Playlist(1)));
+        assert_eq!(resolve_source(2, 0, 2), None);
+        // An empty library resolves nothing at all.
+        assert_eq!(resolve_source(0, 0, 0), None);
+    }
+
+    /// Regression test: playlist indices used to be `u8`, so a library with
+    /// more than 255 sources had both the index and the counts truncated.
+    /// Index 398 wrapped to 142, which either played the wrong playlist or
+    /// was rejected as not found.
+    #[test]
+    fn resolve_source_handles_more_sources_than_fit_in_a_u8() {
+        assert_eq!(resolve_source(398, 0, 500), Some(Source::Playlist(398)));
+        assert_eq!(resolve_source(255, 0, 500), Some(Source::Playlist(255)));
+        assert_eq!(resolve_source(256, 0, 500), Some(Source::Playlist(256)));
+
+        // The same with streams below the playlists, so the subtraction is
+        // exercised past the u8 boundary too.
+        assert_eq!(resolve_source(398, 3, 500), Some(Source::Playlist(395)));
+        assert_eq!(resolve_source(300, 300, 300), Some(Source::Playlist(0)));
+        assert_eq!(resolve_source(299, 300, 300), Some(Source::Stream(299)));
+
+        // Out of range stays out of range instead of wrapping into it.
+        assert_eq!(resolve_source(600, 0, 500), None);
+        assert_eq!(resolve_source(500, 0, 500), None);
     }
 
     #[test]
