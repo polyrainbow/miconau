@@ -1,4 +1,4 @@
-use axum::{extract::{Path, Request, State, Multipart}, http::{header, HeaderMap, StatusCode}, middleware::{self, Next}, response::{sse::{Event, KeepAlive}, Response, Sse}, routing::{get, post}, Json, Router};
+use axum::{extract::{Path, Query, Request, State, Multipart}, http::{header, HeaderMap, StatusCode}, middleware::{self, Next}, response::{sse::{Event, KeepAlive}, Response, Sse}, routing::{get, post}, Json, Router};
 use serde::{Serialize};
 use tokio::sync::Mutex;
 use tower::ServiceBuilder;
@@ -117,13 +117,26 @@ async fn get_stream_logo(
     Err(StatusCode::NOT_FOUND)
 }
 
+#[derive(serde::Deserialize)]
+struct PlaylistQuery {
+    /// Text the playlist list is filtered by. Filtering happens here because
+    /// the tracks it searches are only loaded into the browser one playlist at
+    /// a time.
+    #[serde(default)]
+    filter: String,
+}
+
 async fn get_playlists(
     State(server_state): State<ServerState>,
+    Query(query): Query<PlaylistQuery>,
 ) -> Json<Vec<PlaylistInfo>> {
     let player = server_state.player.lock().await;
+    // Numbered before filtering, so an index keeps pointing at the same
+    // playlist no matter what the list is filtered by.
     let playlists: Vec<PlaylistInfo> = player.library.playlists
         .iter()
         .enumerate()
+        .filter(|(_, playlist)| playlist.matches_filter(&query.filter))
         .map(|(index, playlist)| PlaylistInfo {
             name: playlist.title.clone(),
             index,
@@ -145,18 +158,10 @@ async fn get_playlist_tracks(
     let tracks: Vec<TrackInfo> = playlist.tracks
         .iter()
         .enumerate()
-        .map(|(track_index, track)| {
-            let title = track.title.clone().unwrap_or_else(|| {
-                track.filename
-                    .file_stem()
-                    .map(|s| s.to_string_lossy().to_string())
-                    .unwrap_or_else(|| "Unknown".to_string())
-            });
-            TrackInfo {
-                title,
-                artist: track.artist.clone(),
-                index: track_index,
-            }
+        .map(|(track_index, track)| TrackInfo {
+            title: track.display_title(),
+            artist: track.artist.clone(),
+            index: track_index,
         })
         .collect();
     Ok(Json(tracks))

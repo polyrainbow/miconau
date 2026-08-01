@@ -59,6 +59,19 @@ pub struct Track {
     pub has_cover_art: bool,
 }
 
+impl Track {
+    /// The name to show for this track: its title tag, or the file name for
+    /// the untagged files a library always has some of.
+    pub fn display_title(&self) -> String {
+        self.title.clone().unwrap_or_else(|| {
+            self.filename
+                .file_stem()
+                .map(|stem| stem.to_string_lossy().to_string())
+                .unwrap_or_else(|| "Unknown".to_string())
+        })
+    }
+}
+
 /// Reads the tags of one audio file. The scan already opens every file here,
 /// so noting whether it has artwork costs nothing extra and saves reopening
 /// the first track of every playlist.
@@ -297,6 +310,35 @@ pub struct Playlist {
     /// Holding the path instead of the image keeps a large library's covers
     /// out of memory.
     pub cover_source: Option<PathBuf>,
+}
+
+impl Playlist {
+    /// Whether this playlist should be shown for `filter`. Every word of the
+    /// filter has to turn up somewhere in the playlist - its own title, or the
+    /// title or artist of one of its tracks - but they may turn up in
+    /// different places, so "beatles revolver" finds the album even though
+    /// neither word alone identifies it. An empty filter matches everything.
+    pub fn matches_filter(&self, filter: &str) -> bool {
+        let words: Vec<String> = filter
+            .split_whitespace()
+            .map(|word| word.to_lowercase())
+            .collect();
+        if words.is_empty() {
+            return true;
+        }
+
+        let mut fields: Vec<String> = vec![self.title.to_lowercase()];
+        for track in &self.tracks {
+            fields.push(track.display_title().to_lowercase());
+            if let Some(artist) = &track.artist {
+                fields.push(artist.to_lowercase());
+            }
+        }
+
+        words
+            .iter()
+            .all(|word| fields.iter().any(|field| field.contains(word)))
+    }
 }
 
 pub struct Stream {
@@ -670,6 +712,68 @@ mod tests {
             temp.playlist_titles()
         );
         assert_eq!(progressive.playlists.len(), 4);
+    }
+
+    fn track(filename: &str, title: Option<&str>, artist: Option<&str>) -> Track {
+        Track {
+            filename: PathBuf::from(filename),
+            artist: artist.map(|artist| artist.to_string()),
+            title: title.map(|title| title.to_string()),
+            has_cover_art: false,
+        }
+    }
+
+    fn filter_playlist() -> Playlist {
+        Playlist {
+            title: "The Beatles/Revolver".to_string(),
+            tracks: vec![
+                track("01.mp3", Some("Taxman"), Some("The Beatles")),
+                track("02.mp3", Some("Eleanor Rigby"), Some("The Beatles")),
+                track("03 Untagged Song.mp3", None, None),
+            ],
+            cover_source: None,
+        }
+    }
+
+    #[test]
+    fn filter_matches_playlist_title_song_title_and_artist() {
+        let playlist = filter_playlist();
+
+        assert!(playlist.matches_filter("revolver"));
+        assert!(playlist.matches_filter("rigby"));
+        assert!(playlist.matches_filter("beatles"));
+        // untagged tracks are matched by the name they are shown under
+        assert!(playlist.matches_filter("untagged song"));
+
+        assert!(!playlist.matches_filter("zappa"));
+    }
+
+    #[test]
+    fn filter_matches_case_insensitively_and_on_partial_words() {
+        let playlist = filter_playlist();
+
+        assert!(playlist.matches_filter("BEATLES"));
+        assert!(playlist.matches_filter("ReVoLvEr"));
+        assert!(playlist.matches_filter("axma"));
+    }
+
+    #[test]
+    fn every_filter_word_has_to_match_but_they_may_match_different_fields() {
+        let playlist = filter_playlist();
+
+        // "beatles" is an artist, "revolver" the playlist title
+        assert!(playlist.matches_filter("beatles revolver"));
+        // and one word missing is enough to drop the playlist
+        assert!(!playlist.matches_filter("beatles yesterday"));
+    }
+
+    #[test]
+    fn an_empty_filter_matches_every_playlist() {
+        let playlist = filter_playlist();
+
+        assert!(playlist.matches_filter(""));
+        assert!(playlist.matches_filter("   "));
+        assert!(empty_playlist("Anything").matches_filter(""));
     }
 
     #[test]

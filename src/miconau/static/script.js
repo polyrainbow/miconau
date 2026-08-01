@@ -19,12 +19,24 @@ async function loadStreams() {
   }
 }
 
+let filterTimeout;
+
+/// Reloads the list a moment after the last keystroke, so typing a word does
+/// not fire a request per letter.
+function filterPlaylists() {
+  clearTimeout(filterTimeout);
+  filterTimeout = setTimeout(loadPlaylists, 200);
+}
+
 async function loadPlaylists() {
   try {
-    const response = await fetch('/api/playlists');
+    const filter = document.getElementById('playlistFilter').value.trim();
+    const response = await fetch(`/api/playlists?filter=${encodeURIComponent(filter)}`);
     const playlists = await response.json();
     const playlistsContainer = document.getElementById('playlists');
     playlistsContainer.innerHTML = '';
+    document.getElementById('playlistsEmpty').style.display =
+      playlists.length === 0 && filter ? 'block' : 'none';
 
     for (const playlist of playlists) {
       // Wrapper div for the playlist row
