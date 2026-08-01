@@ -1,6 +1,26 @@
 use crate::player::Player;
+use std::time::Duration;
 
 static WHITE_KEYS: [u8; 7] = [0, 2, 4, 5, 7, 9, 11];
+
+/// Formats how long something took, for the log. A big collection on an
+/// external drive takes minutes to scan, and "312.4s" is harder to read at a
+/// glance than "5m 12s".
+pub fn format_duration(duration: Duration) -> String {
+    let total_seconds = duration.as_secs();
+    if total_seconds < 60 {
+        return format!("{:.1}s", duration.as_secs_f32());
+    }
+
+    let hours = total_seconds / 3600;
+    let minutes = (total_seconds % 3600) / 60;
+    let seconds = total_seconds % 60;
+    if hours > 0 {
+        format!("{}h {:02}m {:02}s", hours, minutes, seconds)
+    } else {
+        format!("{}m {:02}s", minutes, seconds)
+    }
+}
 
 // https://www.inspiredacoustics.com/en/MIDI_note_numbers_and_center_frequencies
 pub fn is_white_key(key: u8) -> bool {
@@ -217,6 +237,23 @@ mod tests {
         // Out of range stays out of range instead of wrapping into it.
         assert_eq!(resolve_source(600, 0, 500), None);
         assert_eq!(resolve_source(500, 0, 500), None);
+    }
+
+    #[test]
+    fn format_duration_stays_in_seconds_below_a_minute() {
+        assert_eq!(format_duration(Duration::from_millis(0)), "0.0s");
+        assert_eq!(format_duration(Duration::from_millis(1450)), "1.5s");
+        assert_eq!(format_duration(Duration::from_secs(59)), "59.0s");
+    }
+
+    #[test]
+    fn format_duration_switches_to_minutes_and_hours() {
+        assert_eq!(format_duration(Duration::from_secs(60)), "1m 00s");
+        assert_eq!(format_duration(Duration::from_secs(312)), "5m 12s");
+        assert_eq!(format_duration(Duration::from_secs(3599)), "59m 59s");
+        assert_eq!(format_duration(Duration::from_secs(3600)), "1h 00m 00s");
+        // a very slow library on a very slow drive
+        assert_eq!(format_duration(Duration::from_secs(7452)), "2h 04m 12s");
     }
 
     #[test]

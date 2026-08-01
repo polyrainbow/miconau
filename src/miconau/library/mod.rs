@@ -5,6 +5,7 @@ use std::{
 };
 use lofty::prelude::*;
 use lofty::probe::Probe;
+use crate::utils::format_duration;
 
 /// How often the scan reports that it is still alive while working through a
 /// single folder.
@@ -40,8 +41,8 @@ impl ScanProgress {
         }
         self.last_heartbeat = Instant::now();
         println!(
-            "Still scanning after {}s: {} folders, {} tracks. Currently in {:?}",
-            self.started.elapsed().as_secs(),
+            "Still scanning after {}: {} folders, {} tracks. Currently in {:?}",
+            format_duration(self.started.elapsed()),
             self.folders,
             self.tracks,
             current,
@@ -219,8 +220,8 @@ pub fn scan_playlists(library_folder: &str, on_playlist: &mut dyn FnMut(Playlist
     scan_folder(&root, &root, &allowed_extensions, on_playlist, &mut progress);
 
     println!(
-        "Scan finished in {:.1}s: {} playlists, {} tracks in {} folders.",
-        progress.started.elapsed().as_secs_f32(),
+        "Scan finished in {}: {} playlists, {} tracks in {} folders.",
+        format_duration(progress.started.elapsed()),
         progress.playlists,
         progress.tracks,
         progress.folders,

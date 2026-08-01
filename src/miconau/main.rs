@@ -37,6 +37,11 @@ const SCAN_NOTIFY_INTERVAL: Duration = Duration::from_secs(2);
 /// fully blocking, and main parks its own thread when no MIDI device is found.
 fn spawn_library_scan(library_folder: String, player: Arc<Mutex<Player>>) {
     thread::spawn(move || {
+        // Timed from here rather than from inside the scan, so the reported
+        // total is everything the library needs to be ready: the streams file,
+        // the folder walk and sorting the playlists into place.
+        let started = Instant::now();
+
         // Streams first. They are cheap to read and occupy the white keys
         // below the playlists, so loading them up front keeps every playlist
         // key from shifting once the first playlist arrives.
@@ -62,7 +67,12 @@ fn spawn_library_scan(library_folder: String, player: Arc<Mutex<Player>>) {
         let player = player.blocking_lock();
         player.library.log_playlists();
         player.notify_library_updated();
-        println!("Library is ready.");
+        println!(
+            "Library is ready after {}: {} playlists, {} streams.",
+            format_duration(started.elapsed()),
+            player.library.playlists.len(),
+            player.library.streams.len(),
+        );
     });
 }
 
