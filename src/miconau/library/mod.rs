@@ -374,6 +374,17 @@ impl Library {
         self.playlists.insert(position, playlist);
     }
 
+    /// Finds the playlist and track a file belongs to. Tracks are grouped by
+    /// the folder they live in, so the file's own path says which playlist to
+    /// look in and no scan of the whole library is needed.
+    pub fn find_track(&self, file_path: &Path) -> Option<(&Playlist, &Track)> {
+        let folder = file_path.parent()?;
+        let title = playlist_title(folder, Path::new(&self.folder));
+        let playlist = self.playlists.iter().find(|playlist| playlist.title == title)?;
+        let track = playlist.tracks.iter().find(|track| track.filename == file_path)?;
+        Some((playlist, track))
+    }
+
     /// Logs the playlists with the index each one is reachable at, both on the
     /// keyboard and in the web API.
     pub fn log_playlists(&self) {
@@ -586,6 +597,45 @@ mod tests {
                 .collect::<Vec<String>>(),
             vec!["01.mp3".to_string(), "02.mp3".to_string(), "03.mp3".to_string()]
         );
+    }
+
+    #[test]
+    fn finds_a_track_by_its_file_path() {
+        let library = TempLibrary::new("find-track");
+        library
+            .file("Artist/Album/01.mp3", "")
+            .file("Artist/Album/02.mp3", "")
+            .file("Other/01.mp3", "");
+        let scanned = library.scan();
+
+        let (playlist, track) = scanned
+            .find_track(&library.path.join("Artist/Album/02.mp3"))
+            .expect("track should be found");
+        assert_eq!(playlist.title, title(&["Artist", "Album"]));
+        assert_eq!(track.display_title(), "02");
+    }
+
+    #[test]
+    fn finds_a_track_in_the_library_root() {
+        let library = TempLibrary::new("find-root-track");
+        library.file("01.mp3", "").file("Album/01.mp3", "");
+        let scanned = library.scan();
+
+        let (playlist, _) = scanned
+            .find_track(&library.path.join("01.mp3"))
+            .expect("track should be found");
+        assert_eq!(playlist.title, library.name());
+    }
+
+    #[test]
+    fn finds_no_track_for_files_outside_the_library() {
+        let library = TempLibrary::new("find-nothing");
+        library.file("Album/01.mp3", "");
+        let scanned = library.scan();
+
+        // a stream, and a file in a folder the library does know
+        assert!(scanned.find_track(Path::new("http://example.com/stream")).is_none());
+        assert!(scanned.find_track(&library.path.join("Album/99.mp3")).is_none());
     }
 
     #[test]

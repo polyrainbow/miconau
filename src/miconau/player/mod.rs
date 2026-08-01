@@ -7,6 +7,7 @@ use tokio::sync::{broadcast};
 use crate::library::{Library};
 use std::env;
 use std::ops::Deref;
+use std::path::Path;
 use std::process::Child;
 use serde::Serialize;
 
@@ -326,14 +327,32 @@ impl Player {
     }
 
     pub fn play_previous_track(&mut self) {
-        // When going back, re-add the current track to the front of the queue
-        if let Some(SourceInfo::Track { track_title, artist, playlist_name }) = &self.state.source_info {
-            if let Ok(current_file) = self.mpv_controller.get_property::<String>("path") {
+        // At the first track there is nothing to go back to: mpv refuses the
+        // command and keeps playing, so the queue must stay untouched too.
+        let playlist_pos: usize = self.mpv_controller
+            .get_property("playlist-pos")
+            .unwrap_or(0);
+        if playlist_pos == 0 {
+            return;
+        }
+
+        // Going back puts the track we are leaving at the front of the queue:
+        // it is the next thing that will play again.
+        let current_track = match &self.state.source_info {
+            Some(SourceInfo::Track { track_title, artist, playlist_name }) => Some((
+                track_title.clone(),
+                artist.clone(),
+                playlist_name.clone(),
+            )),
+            _ => None,
+        };
+        if let Some((track_title, track_artist, playlist_name)) = current_track {
+            if let Ok(file_path) = self.mpv_controller.get_property::<String>("path") {
                 self.queue.insert(0, QueueItem {
-                    playlist_name: playlist_name.clone(),
-                    track_title: track_title.clone(),
-                    track_artist: artist.clone(),
-                    file_path: current_file,
+                    playlist_name,
+                    track_title,
+                    track_artist,
+                    file_path,
                 });
                 self.notify_queue_updated();
             }
@@ -342,7 +361,7 @@ impl Player {
         let _ = self.mpv_controller.run_command(
             MpvCommand::PlaylistPrev,
         );
-        self.update_state_from_mpv_playlist();
+        // State is updated by on_track_started when mpv fires StartFile event
     }
 
     pub fn play_next_track(&mut self) {
@@ -352,46 +371,16 @@ impl Player {
         // Queue sync is handled by on_track_started when mpv fires StartFile event
     }
 
-    /// Updates the player state based on the current mpv playlist position.
-    /// Used after playlist-next/playlist-prev commands.
-    fn update_state_from_mpv_playlist(&mut self) {
-        // Get current playlist position from mpv
-        let playlist_pos: usize = match self.mpv_controller.get_property("playlist-pos") {
-            Ok(pos) => pos,
-            Err(_) => return, // Can't get position, don't update state
-        };
-
-        // Try to find the current playlist from state
-        let playlist_name = match &self.state.source_info {
-            Some(SourceInfo::Track { playlist_name, .. }) => playlist_name.clone(),
-            _ => return, // Not playing a playlist, don't update
-        };
-
-        // Find the playlist in the library
-        let playlist = match self.library.playlists.iter().find(|p| p.title == playlist_name) {
-            Some(p) => p,
-            None => return,
-        };
-
-        // Get the track at the current position
-        if let Some(track) = playlist.tracks.get(playlist_pos) {
-            let track_title = track.title.clone().unwrap_or_else(|| {
-                track.filename
-                    .file_stem()
-                    .map(|s| s.to_string_lossy().to_string())
-                    .unwrap_or_else(|| "Unknown".to_string())
-            });
-            let artist = track.artist.clone();
-
-            self.set_state(PlayerState {
-                source_info: Some(SourceInfo::Track {
-                    track_title,
-                    artist,
-                    playlist_name,
-                }),
-                mode: PlayerMode::Playing,
-            });
-        }
+    /// What to display for the file mpv is playing, looked up in the library.
+    /// Returns None for anything the library doesn't know, such as a stream or
+    /// the error sound.
+    fn source_info_for_file(&self, file_path: &str) -> Option<SourceInfo> {
+        let (playlist, track) = self.library.find_track(Path::new(file_path))?;
+        Some(SourceInfo::Track {
+            track_title: track.display_title(),
+            artist: track.artist.clone(),
+            playlist_name: playlist.title.clone(),
+        })
     }
 
     pub fn stop(&mut self) {
@@ -498,22 +487,25 @@ impl Player {
         }
     }
 
-    /// Called when mpv advances to the next track in its playlist.
-    /// Syncs the Rust queue by removing the first item if the queue is non-empty
-    /// and we're past the first track in mpv's playlist.
+    /// Called when mpv starts a file. Keeps the queue and the displayed track
+    /// in step with what mpv is actually playing, which is the file mpv
+    /// reports rather than a position: going back leaves the queue where it
+    /// is, so a position alone cannot tell the two directions apart.
     pub fn on_track_started(&mut self) {
-        // Check if we have queue items and we're playing a queued track
-        // mpv's playlist-pos > 0 means we've advanced beyond the first track
-        let playlist_pos: usize = self.mpv_controller
-            .get_property("playlist-pos")
-            .unwrap_or(0);
-        
-        if !self.queue.is_empty() && playlist_pos > 0 {
-            // We're playing a track from the queue
+        let current_file: String = match self.mpv_controller.get_property("path") {
+            Ok(path) => path,
+            Err(_) => return, // Can't tell what is playing, don't update state
+        };
+
+        // Playing on: the file that started is the one at the head of the
+        // queue, so it moves out of the queue and into the display.
+        let plays_head_of_queue = self.queue
+            .first()
+            .map_or(false, |item| item.file_path == current_file);
+        if plays_head_of_queue {
             let item = self.queue.remove(0);
             println!("Playing queued track: {} - {}", item.playlist_name, item.track_title);
-            
-            // Update state to show the new track
+
             self.set_state(PlayerState {
                 source_info: Some(SourceInfo::Track {
                     track_title: item.track_title,
@@ -522,8 +514,18 @@ impl Player {
                 }),
                 mode: PlayerMode::Playing,
             });
-            
+
             self.notify_queue_updated();
+            return;
+        }
+
+        // Anything else - going back, or the first track of a playlist - keeps
+        // the queue and takes what to display from the library.
+        if let Some(source_info) = self.source_info_for_file(&current_file) {
+            self.set_state(PlayerState {
+                source_info: Some(source_info),
+                mode: PlayerMode::Playing,
+            });
         }
     }
 }
