@@ -28,99 +28,164 @@ function filterPlaylists() {
   filterTimeout = setTimeout(loadPlaylists, 200);
 }
 
+/// The rows currently on screen, by playlist name. Reusing them instead of
+/// rebuilding the list keeps expanded playlists open, their tracks loaded and
+/// their covers displayed while a scan keeps filling the library.
+const playlistRows = new Map();
+
+/// Builds the row for a playlist. The row keeps its playlist index in
+/// `row.playlistIndex` and every handler reads it from there, because a scan
+/// inserts playlists in sorted order and so shifts the indices of the rows
+/// already on screen.
+function createPlaylistRow(playlist) {
+  // Wrapper div for the playlist row
+  const playlistWrapper = document.createElement('div');
+  playlistWrapper.className = 'playlist';
+  playlistWrapper.playlistIndex = playlist.index;
+
+  // Details element for expandable tracks
+  const details = document.createElement('details');
+  details.className = 'playlist-details';
+
+  const summary = document.createElement('summary');
+  summary.className = 'playlist-summary';
+
+  if (playlist.has_cover) {
+    const coverImg = document.createElement('img');
+    coverImg.src = `/api/playlist/${playlist.index}/cover`;
+    coverImg.alt = '';
+    coverImg.className = 'playlist-cover';
+    coverImg.loading = 'lazy';
+    summary.appendChild(coverImg);
+  }
+
+  const titleSpan = document.createElement('span');
+  titleSpan.textContent = playlist.name;
+  titleSpan.className = 'playlist-title';
+
+  summary.appendChild(titleSpan);
+  details.appendChild(summary);
+
+  // Inner play button (visible when expanded, outside summary for accessibility)
+  const innerPlayBtn = document.createElement('button');
+  innerPlayBtn.textContent = '▶ Play';
+  innerPlayBtn.className = 'playlist-play-button-inner';
+  innerPlayBtn.addEventListener('click', () => {
+    playPlaylist(playlistWrapper.playlistIndex);
+  });
+  details.appendChild(innerPlayBtn);
+
+  const trackList = document.createElement('ul');
+  trackList.className = 'track-list';
+  trackList.innerHTML = '<li>Loading...</li>';
+  details.appendChild(trackList);
+
+  // The track buttons only carry their track index, so the row survives a
+  // shifting playlist index without having to be re-rendered.
+  trackList.addEventListener('click', (event) => {
+    const button = event.target.closest('button');
+    if (!button || !button.dataset.trackIndex) return;
+    const trackIndex = Number(button.dataset.trackIndex);
+    if (button.classList.contains('track-play-button')) {
+      playPlaylistTrack(playlistWrapper.playlistIndex, trackIndex);
+    } else {
+      addToQueue(playlistWrapper.playlistIndex, trackIndex);
+    }
+  });
+
+  // Play button outside details/summary for accessibility
+  const playBtn = document.createElement('button');
+  playBtn.textContent = '▶';
+  playBtn.className = 'playlist-play-button';
+  playBtn.addEventListener('click', () => {
+    playPlaylist(playlistWrapper.playlistIndex);
+  });
+
+  // Lazy load tracks when opening
+  details.addEventListener('toggle', async () => {
+    if (details.open && !details.dataset.loaded) {
+      try {
+        const trackResponse = await fetch(
+          `/api/playlist/${playlistWrapper.playlistIndex}/tracks`,
+        );
+        if (!trackResponse.ok) throw new Error('Failed to load tracks');
+        const tracks = await trackResponse.json();
+        if (tracks.length === 0) {
+          trackList.innerHTML = '<li><em>No tracks</em></li>';
+        } else {
+          trackList.innerHTML = tracks.map(track =>
+            `<li>
+              <button class="track-play-button" data-track-index="${track.index}">
+                <span class="track-title">${escapeHtml(track.title)}</span>
+                ${track.artist ? `<span class="track-artist">${escapeHtml(track.artist)}</span>` : ''}
+              </button>
+              <button class="track-queue-button" data-track-index="${track.index}">
+                <img src="/icons/queue_music.svg" alt="Add to queue" class="queue-icon">
+              </button>
+            </li>`
+          ).join('');
+        }
+        details.dataset.loaded = 'true';
+      } catch (err) {
+        console.error('Error loading tracks:', err);
+        trackList.innerHTML = '<li><em>Error loading tracks</em></li>';
+      }
+    }
+  });
+
+  playlistWrapper.appendChild(details);
+  playlistWrapper.appendChild(playBtn);
+  return playlistWrapper;
+}
+
+/// Points an existing row at the index the playlist now has. Only a cover that
+/// has not been fetched yet needs a new URL; one that is already on screen
+/// shows the right image no matter which index it was loaded from.
+function updatePlaylistIndex(row, index) {
+  if (row.playlistIndex === index) return;
+  row.playlistIndex = index;
+
+  const coverImg = row.querySelector('.playlist-cover');
+  if (coverImg && !coverImg.complete) {
+    coverImg.src = `/api/playlist/${index}/cover`;
+  }
+}
+
 async function loadPlaylists() {
   try {
     const filter = document.getElementById('playlistFilter').value.trim();
     const response = await fetch(`/api/playlists?filter=${encodeURIComponent(filter)}`);
     const playlists = await response.json();
     const playlistsContainer = document.getElementById('playlists');
-    playlistsContainer.innerHTML = '';
     document.getElementById('playlistsEmpty').style.display =
       playlists.length === 0 && filter ? 'block' : 'none';
 
+    // Move the rows that are already there into their new position instead of
+    // recreating them, and only build the ones that are new.
+    let previousRow = null;
     for (const playlist of playlists) {
-      // Wrapper div for the playlist row
-      const playlistWrapper = document.createElement('div');
-      playlistWrapper.className = 'playlist';
-
-      // Details element for expandable tracks
-      const details = document.createElement('details');
-      details.className = 'playlist-details';
-
-      const summary = document.createElement('summary');
-      summary.className = 'playlist-summary';
-      
-      if (playlist.has_cover) {
-        const coverImg = document.createElement('img');
-        coverImg.src = `/api/playlist/${playlist.index}/cover`;
-        coverImg.alt = '';
-        coverImg.className = 'playlist-cover';
-        coverImg.loading = 'lazy';
-        summary.appendChild(coverImg);
+      let row = playlistRows.get(playlist.name);
+      if (row) {
+        updatePlaylistIndex(row, playlist.index);
+      } else {
+        row = createPlaylistRow(playlist);
+        playlistRows.set(playlist.name, row);
       }
 
-      const titleSpan = document.createElement('span');
-      titleSpan.textContent = playlist.name;
-      titleSpan.className = 'playlist-title';
+      const expectedNext = previousRow ? previousRow.nextSibling : playlistsContainer.firstChild;
+      if (row !== expectedNext) {
+        playlistsContainer.insertBefore(row, expectedNext);
+      }
+      previousRow = row;
+    }
 
-      summary.appendChild(titleSpan);
-      details.appendChild(summary);
-
-      // Inner play button (visible when expanded, outside summary for accessibility)
-      const innerPlayBtn = document.createElement('button');
-      innerPlayBtn.textContent = '▶ Play';
-      innerPlayBtn.className = 'playlist-play-button-inner';
-      innerPlayBtn.addEventListener('click', () => {
-        playPlaylist(playlist.index);
-      });
-      details.appendChild(innerPlayBtn);
-
-      const trackList = document.createElement('ul');
-      trackList.className = 'track-list';
-      trackList.innerHTML = '<li>Loading...</li>';
-      details.appendChild(trackList);
-
-      // Play button outside details/summary for accessibility
-      const playBtn = document.createElement('button');
-      playBtn.textContent = '▶';
-      playBtn.className = 'playlist-play-button';
-      playBtn.addEventListener('click', () => {
-        playPlaylist(playlist.index);
-      });
-
-      // Lazy load tracks when opening
-      details.addEventListener('toggle', async () => {
-        if (details.open && !details.dataset.loaded) {
-          try {
-            const trackResponse = await fetch(`/api/playlist/${playlist.index}/tracks`);
-            if (!trackResponse.ok) throw new Error('Failed to load tracks');
-            const tracks = await trackResponse.json();
-            if (tracks.length === 0) {
-              trackList.innerHTML = '<li><em>No tracks</em></li>';
-            } else {
-              trackList.innerHTML = tracks.map(track => 
-                `<li>
-                  <button class="track-play-button" onclick="playPlaylistTrack(${playlist.index}, ${track.index})">
-                    <span class="track-title">${escapeHtml(track.title)}</span>
-                    ${track.artist ? `<span class="track-artist">${escapeHtml(track.artist)}</span>` : ''}
-                  </button>
-                  <button class="track-queue-button" onclick="addToQueue(${playlist.index}, ${track.index})">
-                    <img src="/icons/queue_music.svg" alt="Add to queue" class="queue-icon">
-                  </button>
-                </li>`
-              ).join('');
-            }
-            details.dataset.loaded = 'true';
-          } catch (err) {
-            console.error('Error loading tracks:', err);
-            trackList.innerHTML = '<li><em>Error loading tracks</em></li>';
-          }
-        }
-      });
-
-      playlistWrapper.appendChild(details);
-      playlistWrapper.appendChild(playBtn);
-      playlistsContainer.appendChild(playlistWrapper);
+    // Drop what the filter or a rescan removed.
+    const names = new Set(playlists.map(playlist => playlist.name));
+    for (const [name, row] of playlistRows) {
+      if (!names.has(name)) {
+        row.remove();
+        playlistRows.delete(name);
+      }
     }
   } catch (error) {
     console.error('Error loading playlists:', error);
