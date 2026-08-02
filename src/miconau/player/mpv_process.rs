@@ -1,6 +1,7 @@
 use std::io::BufReader;
 use std::process::{Child, Command, Stdio};
 use std::io::BufRead;
+use std::thread;
 
 
 pub async fn launch_mpv(output_device: Option<String>, socket_path: String) -> Child {
@@ -36,16 +37,47 @@ pub async fn launch_mpv(output_device: Option<String>, socket_path: String) -> C
 
   let stdout = process.stdout.take().unwrap();
 
-  let reader = BufReader::new(stdout);
+  let mut lines = BufReader::new(stdout).lines();
   /* it waits for new output */
-  for line in reader.lines() {
-      let output = line.unwrap();
+  for line in &mut lines {
+      let output = match line {
+        Ok(output) => output,
+        Err(error) => {
+          println!("MPV: could not read output: {}", error);
+          break;
+        }
+      };
       println!("MPV: {}", output);
       if output.contains("Done loading scripts.") {
         println!("MPV process created");
         break;
       }
   }
+
+  // Keep reading for as long as mpv runs, rather than dropping the reader here.
+  //
+  // Dropping it closes the read end of the pipe, and mpv is not finished
+  // talking: it was started with -v and logs its way through audio device
+  // setup for a while yet. The next line it writes then goes to a pipe nobody
+  // holds open, and mpv is killed by SIGPIPE - Rust ignores that signal in this
+  // process but resets it to its default in children, so mpv gets the fatal
+  // one. Losing mpv that early usually means losing it mid-handshake, while the
+  // first IPC command is in flight: mpv dies with the command still unread, the
+  // kernel resets the socket, and the reply we are waiting for comes back as
+  // ConnectionReset. Under load that was most starts, which is why it showed up
+  // as a crash at boot and almost never by hand.
+  //
+  // Draining in a thread also puts mpv's log back in the journal, where it has
+  // been missing after startup for as long as the reader was dropped.
+  thread::spawn(move || {
+    for line in lines {
+      match line {
+        Ok(output) => println!("MPV: {}", output),
+        // mpv has exited and closed its end. Nothing left to read.
+        Err(_) => break,
+      }
+    }
+  });
 
   process
 }
