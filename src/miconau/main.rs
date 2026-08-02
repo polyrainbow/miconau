@@ -35,7 +35,11 @@ const SCAN_NOTIFY_INTERVAL: Duration = Duration::from_secs(2);
 ///
 /// This is a plain OS thread rather than a tokio task: the scan is long and
 /// fully blocking, and main parks its own thread when no MIDI device is found.
-fn spawn_library_scan(library_folder: String, player: Arc<Mutex<Player>>) {
+fn spawn_library_scan(
+    library_folder: String,
+    streams_folder: Option<String>,
+    player: Arc<Mutex<Player>>,
+) {
     thread::spawn(move || {
         // Timed from here rather than from inside the scan, so the reported
         // total is everything the library needs to be ready: the streams file,
@@ -45,11 +49,13 @@ fn spawn_library_scan(library_folder: String, player: Arc<Mutex<Player>>) {
         // Streams first. They are cheap to read and occupy the white keys
         // below the playlists, so loading them up front keeps every playlist
         // key from shifting once the first playlist arrives.
-        let streams = library::read_streams(&library_folder);
-        {
+        if let Some(streams_folder) = &streams_folder {
+            let streams = library::read_streams(streams_folder);
             let mut player = player.blocking_lock();
             player.library.streams = streams;
             player.notify_library_updated();
+        } else {
+            println!("No streams folder given, playing albums only.");
         }
 
         let mut last_notification = Instant::now();
@@ -117,7 +123,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
         println!("Web server disabled");
     }
 
-    spawn_library_scan(args.library_folder, player.clone());
+    spawn_library_scan(args.library_folder, args.streams_folder, player.clone());
 
     if args.midi_device_index.is_some() {
         println!(

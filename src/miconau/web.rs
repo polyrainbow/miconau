@@ -331,7 +331,13 @@ async fn upload_playlist(
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Error scanning library: {}", e)))?;
 
     let mut player = server_state.player.lock().await;
+    // A rescan only covers the library folder, and streams are configured
+    // outside it, so they have to be moved across to the new library. Taken
+    // here rather than before the scan so the streams stay playable while it
+    // runs.
+    let streams = std::mem::take(&mut player.library.streams);
     player.library = library;
+    player.library.streams = streams;
     player.notify_library_updated();
 
     Ok(Json(json!({"success": true})))

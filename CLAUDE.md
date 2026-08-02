@@ -14,7 +14,8 @@ cargo test                                   # 37 unit tests, all inline #[cfg(t
 cargo test library::tests::skips_hidden_files_and_folders   # single test
 cargo test library::                         # one module's tests
 cargo run --bin miconau -- --library-folder <lib> --start-octave 4 \
-    --address 127.0.0.1:8899 --mpv-socket /tmp/mic-test.sock
+    --address 127.0.0.1:8899 --mpv-socket /tmp/mic-test.sock \
+    --streams-folder <streams>   # optional
 ```
 
 `mpv` must be on PATH. No MIDI device is needed to run: the main thread parks and the web UI still works. `--mpv-socket` must be a **short** path — a long one (e.g. inside a scratchpad dir) panics with `ConnectError("path must be shorter than SUN_LEN")`.
@@ -38,7 +39,7 @@ The player never blocks the lock on disk I/O. Anything that reads files while se
 
 ### Key invariants
 
-**Source indices.** White keys map to a single flat index space: streams first, then playlists (`utils::resolve_source`). Streams are loaded *before* the scan starts so playlist keys don't shift as playlists arrive. These counts are `usize` deliberately — a `u8` truncated libraries over 255 sources; there's a regression test for it.
+**Source indices.** White keys map to a single flat index space: streams first, then playlists (`utils::resolve_source`). Streams are loaded *before* the scan starts so playlist keys don't shift as playlists arrive. They come from `--streams-folder`, which is optional and unrelated to the library folder — `Library::new` deliberately leaves `streams` empty, so anything replacing a library wholesale (the upload rescan in `web.rs`) has to carry the streams across itself. These counts are `usize` deliberately — a `u8` truncated libraries over 255 sources; there's a regression test for it.
 
 **Playlist index stability.** `GET /api/playlists?filter=` numbers playlists *before* filtering, so an index always addresses the same playlist regardless of the filter. Filtering runs server-side because the track titles it searches are only fetched into the browser one playlist at a time.
 
@@ -58,7 +59,9 @@ The player never blocks the lock on disk I/O. Anything that reads files while se
 
 `src/miconau/static/` — vanilla JS, no build step, served directly from the source tree with caching disabled. State arrives over SSE at `/api/notifications` (`playerState`, `libraryUpdated`, `queueUpdated`); everything else is fetch against `/api`. `libraryUpdated` triggers a full playlist reload, so `updatePlaylistIndex` re-points already-expanded rows instead of collapsing them.
 
-## Library folder conventions
+## Streams folder conventions
 
-- `streams.txt` in the library root: blocks separated by blank lines, each `name` / `url` / optional `logo.svg` filename on its own line.
-- `logos/` in the library root holds the SVGs referenced by `streams.txt`.
+`--streams-folder` (optional; nothing is read from the library folder):
+
+- `streams.txt`: blocks separated by blank lines, each `name` / `url` / optional `logo.svg` filename on its own line.
+- `logos/` alongside it holds the SVGs referenced by `streams.txt`. A missing logo file is logged and leaves the stream itself intact.

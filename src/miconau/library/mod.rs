@@ -228,14 +228,18 @@ pub fn scan_playlists(library_folder: &str, on_playlist: &mut dyn FnMut(Playlist
     );
 }
 
-/// Reads the streams from `streams.txt` in the library root. Cheap compared to
-/// the folder scan, so it can be loaded up front. Streams occupy the lowest
-/// white keys, so loading them first keeps the playlist keys from shifting
-/// once the scan starts.
-pub fn read_streams(library_folder: &str) -> Vec<Stream> {
+/// Reads the streams from `streams.txt` in `streams_folder`, with the logos
+/// they name resolved against `logos/` in that same folder. The folder is
+/// deliberately not the library: streams have nothing to do with the music on
+/// disk, so they are configured wherever the user keeps their config.
+///
+/// Cheap compared to the folder scan, so it can be loaded up front. Streams
+/// occupy the lowest white keys, so loading them first keeps the playlist keys
+/// from shifting once the scan starts.
+pub fn read_streams(streams_folder: &str) -> Vec<Stream> {
     let mut streams: Vec<Stream> = Vec::new();
 
-    let streams_file = PathBuf::from(library_folder).join("streams.txt");
+    let streams_file = PathBuf::from(streams_folder).join("streams.txt");
     if !streams_file.is_file() {
         println!("No streams file found.");
         return streams;
@@ -264,9 +268,9 @@ pub fn read_streams(library_folder: &str) -> Vec<Stream> {
             // Optional logo filename
             let logo_svg = if lines.len() >= 3 {
                 let filename = lines[2].trim().to_string();
-                let filepath = PathBuf::from(
-                    format!("{}/{}/{}", library_folder, "logos", filename),
-                );
+                let filepath = PathBuf::from(streams_folder)
+                    .join("logos")
+                    .join(&filename);
                 println!("Logo file path: {:?}", filepath);
                 let svg = fs::read_to_string(filepath);
                 match svg {
@@ -396,9 +400,12 @@ impl Library {
     /// Scans the whole library at once. Blocks until the scan is done, so
     /// callers that need to stay responsive should use `scan_playlists`
     /// together with `insert_playlist` instead.
+    ///
+    /// Leaves `streams` empty: they come from a folder of their own that the
+    /// library knows nothing about, so a caller replacing its library with a
+    /// rescan has to carry the streams over itself.
     pub fn new(library_folder: String) -> Library {
         let mut library = Library::empty(library_folder.clone());
-        library.streams = read_streams(&library_folder);
 
         let mut playlists: Vec<Playlist> = Vec::new();
         scan_playlists(&library_folder, &mut |playlist| playlists.push(playlist));
@@ -828,18 +835,63 @@ mod tests {
     }
 
     #[test]
-    fn reads_streams_from_the_library_root() {
-        let library = TempLibrary::new("streams");
+    fn reads_streams_from_the_streams_folder() {
+        let folder = TempLibrary::new("streams");
+        folder.file(
+            "streams.txt",
+            "A Stream\nhttp://example.com/a\n\nB Stream\nhttp://example.com/b",
+        );
+
+        let streams = read_streams(folder.path.to_str().unwrap());
+        assert_eq!(streams.len(), 2);
+        assert_eq!(streams[0].name, "A Stream");
+        assert_eq!(streams[0].url, "http://example.com/a");
+        assert_eq!(streams[1].name, "B Stream");
+    }
+
+    #[test]
+    fn reads_stream_logos_from_the_streams_folder() {
+        let folder = TempLibrary::new("stream-logos");
+        folder
+            .file(
+                "streams.txt",
+                "With Logo\nhttp://example.com/a\nstation.svg\n\nMissing Logo\nhttp://example.com/b\ngone.svg\n\nNo Logo\nhttp://example.com/c",
+            )
+            .file("logos/station.svg", "<svg id=\"station\"/>");
+
+        let streams = read_streams(folder.path.to_str().unwrap());
+        assert_eq!(streams.len(), 3);
+        // the logo is resolved against the streams folder, not the library
+        assert_eq!(streams[0].logo_svg.as_deref(), Some("<svg id=\"station\"/>"));
+        // a logo that isn't there must not lose the stream itself
+        assert_eq!(streams[1].logo_svg, None);
+        assert_eq!(streams[1].url, "http://example.com/b");
+        assert_eq!(streams[2].logo_svg, None);
+    }
+
+    #[test]
+    fn a_missing_streams_folder_yields_no_streams() {
+        let folder = TempLibrary::new("no-streams");
+
+        assert!(read_streams(folder.path.to_str().unwrap()).is_empty());
+        assert!(read_streams(
+            folder.path.join("does-not-exist").to_str().unwrap()
+        )
+        .is_empty());
+    }
+
+    /// Streams live outside the library folder, so a scan must not pick them
+    /// up even when a leftover streams.txt is sitting in the library root.
+    #[test]
+    fn scanning_the_library_finds_no_streams() {
+        let library = TempLibrary::new("streams-not-in-library");
         library
-            .file("streams.txt", "A Stream\nhttp://example.com/a\n\nB Stream\nhttp://example.com/b")
+            .file("streams.txt", "A Stream\nhttp://example.com/a")
             .file("Album/01.mp3", "");
 
         let scanned = library.scan();
-        assert_eq!(scanned.streams.len(), 2);
-        assert_eq!(scanned.streams[0].name, "A Stream");
-        assert_eq!(scanned.streams[0].url, "http://example.com/a");
-        assert_eq!(scanned.streams[1].name, "B Stream");
-        // the streams file must not turn the root into a playlist
+        assert!(scanned.streams.is_empty());
+        // the streams file must not turn the root into a playlist either
         assert_eq!(
             scanned
                 .playlists
