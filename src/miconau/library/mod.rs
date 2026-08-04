@@ -212,7 +212,7 @@ fn scan_folder(
 /// moment it is found. Lets callers fill a library progressively instead of
 /// waiting for the whole (potentially very slow) scan to finish.
 pub fn scan_playlists(library_folder: &str, on_playlist: &mut dyn FnMut(Playlist)) {
-    let allowed_extensions = vec!["mp3", "flac"];
+    let allowed_extensions = vec!["mp3", "flac", "wav", "ogg", "oga", "opus"];
     let root = PathBuf::from(library_folder);
 
     println!("Scanning library at {}...", library_folder);
@@ -572,8 +572,12 @@ mod tests {
         library
             .file("Album/01.MP3", "")
             .file("Album/02.Flac", "")
-            .file("Album/03.wav", "")
-            .file("Album/04", "");
+            .file("Album/03.WaV", "")
+            .file("Album/04.OGG", "")
+            .file("Album/05.Oga", "")
+            .file("Album/06.OPUS", "")
+            .file("Album/07.m4a", "")
+            .file("Album/08", "");
 
         let playlists = library.scan().playlists;
         assert_eq!(playlists.len(), 1);
@@ -583,7 +587,14 @@ mod tests {
                 .iter()
                 .map(|track| track.filename.file_name().unwrap().to_string_lossy().to_string())
                 .collect::<Vec<String>>(),
-            vec!["01.MP3".to_string(), "02.Flac".to_string()]
+            vec![
+                "01.MP3".to_string(),
+                "02.Flac".to_string(),
+                "03.WaV".to_string(),
+                "04.OGG".to_string(),
+                "05.Oga".to_string(),
+                "06.OPUS".to_string(),
+            ]
         );
     }
 

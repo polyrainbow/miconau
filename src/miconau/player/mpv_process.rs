@@ -11,6 +11,11 @@ pub async fn launch_mpv(output_device: Option<String>, socket_path: String) -> C
     "--no-video".to_string(),
     "--no-input-default-bindings".to_string(),
     "--no-config".to_string(),
+    // Play a playlist without a gap between its tracks: keep the audio device
+    // open across files, and open the next one before the current one ends.
+    // --no-config means mpv's own defaults (weak, no) apply otherwise.
+    "--gapless-audio=yes".to_string(),
+    "--prefetch-playlist=yes".to_string(),
   ];
   
   let mut socket_arg = "--input-ipc-server=".to_owned();

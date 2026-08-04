@@ -114,76 +114,84 @@ impl Player {
     }
 
     pub fn play_playlist(&mut self, playlist_index: usize) {
-        if playlist_index < self.library.playlists.len() {
-            let playlist = self.library.playlists.get(playlist_index).unwrap();
-            let playlist_name = playlist.title.clone();
-            println!("Playing playlist {}", playlist_name);
-            let mut path = self.library.folder.clone();
-            path.push_str("/");
-            path.push_str(&playlist_name);
-            
-            // Get first track info for display
-            let (track_title, artist) = if let Some(first_track) = playlist.tracks.first() {
-                let title = first_track.title.clone().unwrap_or_else(|| {
-                    first_track.filename
-                        .file_stem()
-                        .map(|s| s.to_string_lossy().to_string())
-                        .unwrap_or_else(|| "Unknown".to_string())
-                });
-                (title, first_track.artist.clone())
-            } else {
-                (String::new(), None)
-            };
-            
-            self.mpv_controller.run_command(
-                MpvCommand::LoadFile {
-                    file: path,
-                    option: PlaylistAddOptions::Replace,
-                }
-            ).unwrap();
+        // Bounds are checked up front so the reference to the playlist below
+        // does not keep the library borrowed while the error path needs
+        // `&mut self`. A missing playlist has no tracks, so the one check
+        // covers a bad playlist index as well.
+        let track_count = self.library.playlists
+            .get(playlist_index)
+            .map_or(0, |playlist| playlist.tracks.len());
 
-            self.mpv_controller.set_property(
-                "loop-playlist",
-                String::from("no"),
-            ).unwrap();
-
-            self.mpv_controller.set_property("pause", false)
-                .expect("Error setting pause property to false");
-
-            // Clear any existing queue and populate with remaining tracks from playlist
-            self.queue.clear();
-            for track in playlist.tracks.iter().skip(1) {
-                let queue_track_title = track.title.clone().unwrap_or_else(|| {
-                    track.filename
-                        .file_stem()
-                        .map(|s| s.to_string_lossy().to_string())
-                        .unwrap_or_else(|| "Unknown".to_string())
-                });
-                self.queue.push(QueueItem {
-                    playlist_name: playlist_name.clone(),
-                    track_title: queue_track_title,
-                    track_artist: track.artist.clone(),
-                    file_path: track.filename.to_string_lossy().to_string(),
-                });
-            }
-            self.notify_queue_updated();
-
-            self.set_state(PlayerState {
-                source_info: Some(SourceInfo::Track {
-                    track_title,
-                    artist,
-                    playlist_name,
-                }),
-                mode: PlayerMode::Playing,
-            });
-        } else {
+        if track_count == 0 {
             println!("Playlist with index {} not found. Playing error sound.", playlist_index);
             self.play_error();
             self.set_state(PlayerState {
                 source_info: None,
                 mode: PlayerMode::Stopped,
             });
+            return;
         }
+
+        let playlist = self.library.playlists.get(playlist_index).unwrap();
+        let playlist_name = playlist.title.clone();
+        println!("Playing playlist {}", playlist_name);
+
+        let first_track = playlist.tracks.first().unwrap();
+        let track_title = first_track.display_title();
+        let artist = first_track.artist.clone();
+        let first_path = first_track.filename.to_string_lossy().to_string();
+
+        // The tracks that follow, as the queue will mirror them.
+        let rest: Vec<QueueItem> = playlist.tracks
+            .iter()
+            .skip(1)
+            .map(|track| QueueItem {
+                playlist_name: playlist_name.clone(),
+                track_title: track.display_title(),
+                track_artist: track.artist.clone(),
+                file_path: track.filename.to_string_lossy().to_string(),
+            })
+            .collect();
+
+        // mpv is handed the tracks one by one rather than the playlist folder.
+        // Given a folder, mpv enumerates it itself and plays everything it
+        // considers playable, which includes the file types the scan filtered
+        // out and leaves mpv's playlist out of step with `queue`.
+        self.mpv_controller.run_command(
+            MpvCommand::LoadFile {
+                file: first_path,
+                option: PlaylistAddOptions::Replace,
+            }
+        ).unwrap();
+
+        for item in &rest {
+            self.mpv_controller.run_command(
+                MpvCommand::LoadFile {
+                    file: item.file_path.clone(),
+                    option: PlaylistAddOptions::Append,
+                }
+            ).unwrap();
+        }
+
+        self.mpv_controller.set_property(
+            "loop-playlist",
+            String::from("no"),
+        ).unwrap();
+
+        self.mpv_controller.set_property("pause", false)
+            .expect("Error setting pause property to false");
+
+        self.queue = rest;
+        self.notify_queue_updated();
+
+        self.set_state(PlayerState {
+            source_info: Some(SourceInfo::Track {
+                track_title,
+                artist,
+                playlist_name,
+            }),
+            mode: PlayerMode::Playing,
+        });
     }
 
     pub fn play_playlist_track(
