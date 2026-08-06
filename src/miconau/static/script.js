@@ -11,7 +11,7 @@ async function loadStreams() {
         ? `<img src="/api/stream-logo/${stream.name}" alt="${stream.name} icon" class="stream-icon">`
         : ''
       }
-                ${stream.name}
+                <span class="stream-title">${stream.name}</span>
             </button>
         `).join('');
   } catch (error) {
