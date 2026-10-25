@@ -536,6 +536,25 @@ impl Player {
             });
         }
     }
+
+    /// Called when mpv goes idle: the playlist has played out, a stream has
+    /// dropped, or playback was stopped. mpv is asked whether it is still idle
+    /// rather than taking the event's word for it - a key pressed right after
+    /// stop loads a file before the listener gets to the stop's idle event,
+    /// and that event must not mark the new playback as stopped.
+    pub fn on_idle(&mut self) {
+        let still_idle: bool = self.mpv_controller
+            .get_property("idle-active")
+            .unwrap_or(false);
+        if !still_idle {
+            return;
+        }
+
+        self.set_state(PlayerState {
+            source_info: None,
+            mode: PlayerMode::Stopped,
+        });
+    }
 }
 
 /// Spawns a background task that listens for mpv events and syncs the queue.
@@ -576,6 +595,19 @@ pub fn spawn_mpv_event_listener(
                 }
                 Ok(Event::Idle) => {
                     println!("MPV: Idle event received");
+                    // Nothing left to play - show Stopped instead of the last
+                    // track. Same retry as StartFile above.
+                    loop {
+                        match player.try_lock() {
+                            Ok(mut player_guard) => {
+                                player_guard.on_idle();
+                                break;
+                            }
+                            Err(_) => {
+                                std::thread::sleep(std::time::Duration::from_millis(10));
+                            }
+                        }
+                    }
                 }
                 Ok(Event::Shutdown) => {
                     println!("MPV: Shutdown event received");

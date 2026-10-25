@@ -32,7 +32,7 @@ Everything hangs off one `Arc<Mutex<Player>>` shared by four concurrent parts:
 - **main thread** (`main.rs`) — blocking `mpsc` loop receiving `MainThreadEvent::MIDIEvent`, dispatched through `utils::handle_midi_key_press`.
 - **MIDI callback** (`midi_listener/`) — midir thread, forwards note-on messages into the channel.
 - **library scan** (`spawn_library_scan` in `main.rs`) — a plain OS thread, not a tokio task, because the scan is long and fully blocking. Calls `library::scan_playlists` with a callback that takes the lock per playlist and inserts it via `Library::insert_playlist`, so the library is progressively playable while scanning. Notifications to the web UI are coalesced to one every `SCAN_NOTIFY_INTERVAL`.
-- **mpv event listener** (`spawn_mpv_event_listener` in `player/`) — second mpv IPC connection on its own thread; on `StartFile` it calls `Player::on_track_started`, which spins on `try_lock`.
+- **mpv event listener** (`spawn_mpv_event_listener` in `player/`) — second mpv IPC connection on its own thread; on `StartFile` it calls `Player::on_track_started`, on `Idle` (playlist played out, stream dropped, stop) `Player::on_idle`; both spin on `try_lock`. `on_idle` re-checks mpv's `idle-active` before showing Stopped, because a stop's `Idle` can be handled after the next key has already loaded a file.
 - **axum server** (`web.rs`) — tokio tasks, `/api/*` routes plus static files.
 
 The player never blocks the lock on disk I/O. Anything that reads files while serving (cover art, upload rescan) clones the path out of the library, drops the lock, and does the read in `spawn_blocking`.
