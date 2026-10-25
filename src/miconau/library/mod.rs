@@ -163,6 +163,12 @@ fn scan_folder(
             continue;
         }
 
+        // Windows trash folders, found on drives that were used on Windows.
+        // Spelled `$RECYCLE.BIN` or `$Recycle.Bin` depending on the drive.
+        if filename.to_uppercase().contains("$RECYCLE.BIN") {
+            continue;
+        }
+
         if path.is_dir() {
             subfolders.push(path);
             continue;
@@ -564,6 +570,17 @@ mod tests {
         assert_eq!(playlists.len(), 1);
         assert_eq!(playlists[0].title, "Album");
         assert_eq!(playlists[0].tracks.len(), 1);
+    }
+
+    #[test]
+    fn skips_windows_recycle_bins() {
+        let library = TempLibrary::new("recycle-bin");
+        library
+            .file("Album/01.mp3", "")
+            .file("$RECYCLE.BIN/Deleted Album/01.mp3", "")
+            .file("Artist/$Recycle.Bin/S-1-5-21/01.mp3", "");
+
+        assert_eq!(library.playlist_titles(), vec!["Album"]);
     }
 
     #[test]
