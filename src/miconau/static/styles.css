@@ -185,6 +185,24 @@ h1 {
     white-space: nowrap;
 }
 
+.audio-format {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-end;
+    justify-content: center;
+    flex-shrink: 0;
+    margin: 0 0.6rem;
+    font-size: 0.7rem;
+    font-weight: normal;
+    line-height: 1.2;
+    white-space: nowrap;
+    color: light-dark(#666, #999);
+}
+
+.audio-format-name {
+    font-weight: 600;
+}
+
 .playlist-play-button {
     flex-shrink: 0;
     font-size: 0.85rem;

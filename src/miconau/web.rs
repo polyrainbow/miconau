@@ -26,6 +26,9 @@ struct PlaylistInfo {
     name: String,
     index: usize,
     has_cover: bool,
+    /// Every format in the playlist, e.g. "FLAC" or "MP3 / FLAC".
+    format: Option<String>,
+    bitrate_kbps: Option<u32>,
 }
 
 #[derive(Serialize)]
@@ -33,6 +36,8 @@ struct TrackInfo {
     title: String,
     artist: Option<String>,
     index: usize,
+    format: Option<&'static str>,
+    bitrate_kbps: Option<u32>,
 }
 
 #[derive(Serialize)]
@@ -141,6 +146,9 @@ async fn get_playlists(
             name: playlist.title.clone(),
             index,
             has_cover: playlist.cover_source.is_some(),
+            format: Some(playlist.format_labels().join(" / "))
+                .filter(|labels| !labels.is_empty()),
+            bitrate_kbps: playlist.average_bitrate_kbps(),
         })
         .collect();
     Json(playlists)
@@ -162,6 +170,8 @@ async fn get_playlist_tracks(
             title: track.display_title(),
             artist: track.artist.clone(),
             index: track_index,
+            format: track.format.map(|format| format.label()),
+            bitrate_kbps: track.bitrate_kbps,
         })
         .collect();
     Ok(Json(tracks))

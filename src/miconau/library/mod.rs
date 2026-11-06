@@ -3,6 +3,7 @@ use std::{
     path::{Path, PathBuf},
     time::{Duration, Instant},
 };
+use lofty::file::FileType;
 use lofty::prelude::*;
 use lofty::probe::Probe;
 use crate::utils::format_duration;
@@ -50,6 +51,47 @@ impl ScanProgress {
     }
 }
 
+/// The codec of an audio file, as shown next to it in the web UI.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum AudioFormat {
+    Mp3,
+    Flac,
+    Wav,
+    Vorbis,
+    Opus,
+}
+
+impl AudioFormat {
+    /// Taken from the file's contents rather than its extension, so an
+    /// `.ogg` or `.oga` says which codec it actually holds.
+    fn from_file_type(file_type: FileType) -> Option<AudioFormat> {
+        match file_type {
+            FileType::Mpeg => Some(AudioFormat::Mp3),
+            FileType::Flac => Some(AudioFormat::Flac),
+            FileType::Wav => Some(AudioFormat::Wav),
+            FileType::Vorbis => Some(AudioFormat::Vorbis),
+            FileType::Opus => Some(AudioFormat::Opus),
+            _ => None,
+        }
+    }
+
+    pub fn label(self) -> &'static str {
+        match self {
+            AudioFormat::Mp3 => "MP3",
+            AudioFormat::Flac => "FLAC",
+            AudioFormat::Wav => "WAV",
+            AudioFormat::Vorbis => "OGG",
+            AudioFormat::Opus => "OPUS",
+        }
+    }
+
+    /// Only lossy formats get a bitrate shown: for a lossless file it says
+    /// nothing about quality, just how well the audio compressed.
+    pub fn is_lossy(self) -> bool {
+        matches!(self, AudioFormat::Mp3 | AudioFormat::Vorbis | AudioFormat::Opus)
+    }
+}
+
 pub struct Track {
     pub filename: PathBuf,
     pub artist: Option<String>,
@@ -58,6 +100,10 @@ pub struct Track {
     /// a few thousand albums with embedded covers add up to gigabytes, so
     /// covers are read from the file again when they are served.
     pub has_cover_art: bool,
+    /// `None` for a file lofty could not read.
+    pub format: Option<AudioFormat>,
+    /// Audio bitrate in kbit/s, only recorded for lossy formats.
+    pub bitrate_kbps: Option<u32>,
 }
 
 impl Track {
@@ -73,30 +119,39 @@ impl Track {
     }
 }
 
-/// Reads the tags of one audio file. The scan already opens every file here,
-/// so noting whether it has artwork costs nothing extra and saves reopening
-/// the first track of every playlist.
+/// Reads the tags and audio properties of one audio file. The scan already
+/// opens every file here, so noting whether it has artwork and what format it
+/// is costs nothing extra and saves reopening files later.
 fn read_track(path: PathBuf) -> Track {
-    let (artist, title, has_cover_art) = match Probe::open(&path).and_then(|p| p.read()) {
-        Ok(tagged_file) => {
-            match tagged_file.primary_tag().or_else(|| tagged_file.first_tag()) {
-                Some(tag) => (
-                    tag.artist().map(|s| s.to_string()),
-                    tag.title().map(|s| s.to_string()),
-                    !tag.pictures().is_empty(),
-                ),
-                None => (None, None, false),
-            }
-        }
-        Err(_) => (None, None, false),
+    let mut track = Track {
+        filename: path,
+        artist: None,
+        title: None,
+        has_cover_art: false,
+        format: None,
+        bitrate_kbps: None,
     };
 
-    Track {
-        filename: path,
-        artist,
-        title,
-        has_cover_art,
+    let tagged_file = match Probe::open(&track.filename).and_then(|p| p.read()) {
+        Ok(tagged_file) => tagged_file,
+        Err(_) => return track,
+    };
+
+    track.format = AudioFormat::from_file_type(tagged_file.file_type());
+    if track.format.is_some_and(AudioFormat::is_lossy) {
+        track.bitrate_kbps = tagged_file
+            .properties()
+            .audio_bitrate()
+            .filter(|&bitrate| bitrate > 0);
     }
+
+    if let Some(tag) = tagged_file.primary_tag().or_else(|| tagged_file.first_tag()) {
+        track.artist = tag.artist().map(|s| s.to_string());
+        track.title = tag.title().map(|s| s.to_string());
+        track.has_cover_art = !tag.pictures().is_empty();
+    }
+
+    track
 }
 
 /// Reads the embedded cover of an audio file. Called when a cover is actually
@@ -349,6 +404,32 @@ impl Playlist {
         words
             .iter()
             .all(|word| fields.iter().any(|field| field.contains(word)))
+    }
+
+    /// The formats of this playlist's tracks in order of first appearance,
+    /// e.g. `["FLAC"]`, or `["MP3", "FLAC"]` for a mixed folder.
+    pub fn format_labels(&self) -> Vec<&'static str> {
+        let mut labels: Vec<&'static str> = Vec::new();
+        for format in self.tracks.iter().filter_map(|track| track.format) {
+            if !labels.contains(&format.label()) {
+                labels.push(format.label());
+            }
+        }
+        labels
+    }
+
+    /// The average bitrate in kbit/s, if every track is lossy. A VBR album
+    /// has a different bitrate on every track, so one number for the whole
+    /// playlist has to be an average.
+    pub fn average_bitrate_kbps(&self) -> Option<u32> {
+        let bitrates: Option<Vec<u32>> = self
+            .tracks
+            .iter()
+            .map(|track| track.format.filter(|format| format.is_lossy()).and(track.bitrate_kbps))
+            .collect();
+        let bitrates = bitrates.filter(|bitrates| !bitrates.is_empty())?;
+        let total: u64 = bitrates.iter().map(|&bitrate| bitrate as u64).sum();
+        Some((total as f64 / bitrates.len() as f64).round() as u32)
     }
 }
 
@@ -687,6 +768,16 @@ mod tests {
         );
     }
 
+    /// Writes a valid but silent 128 kbit/s mp3 without tags.
+    fn write_mp3(library: &TempLibrary, relative: &str) -> PathBuf {
+        // A run of silent MPEG-1 Layer III frames (128 kbps, 44.1 kHz, so
+        // 417 bytes each). lofty reads audio properties and rejects the file
+        // unless it finds consecutive valid frames.
+        let mut frame = vec![0xFF, 0xFB, 0x90, 0x00];
+        frame.resize(417, 0);
+        library.bytes(relative, &frame.repeat(8))
+    }
+
     /// Writes an mp3 with an embedded cover, and returns the picture bytes it
     /// was given.
     fn write_mp3_with_cover(library: &TempLibrary, relative: &str) -> Vec<u8> {
@@ -694,13 +785,7 @@ mod tests {
         use lofty::picture::{MimeType, Picture, PictureType};
         use lofty::tag::{Tag, TagType};
 
-        // A run of silent MPEG-1 Layer III frames (128 kbps, 44.1 kHz, so
-        // 417 bytes each). lofty reads audio properties and rejects the file
-        // unless it finds consecutive valid frames.
-        let mut frame = vec![0xFF, 0xFB, 0x90, 0x00];
-        frame.resize(417, 0);
-        let mp3 = frame.repeat(8);
-        let path = library.bytes(relative, &mp3);
+        let path = write_mp3(library, relative);
 
         let picture_data = b"not really a jpeg, but never decoded".to_vec();
         let mut tag = Tag::new(TagType::Id3v2);
@@ -746,6 +831,70 @@ mod tests {
         let (data, mime) = read_cover_art(with_cover.cover_source.as_ref().unwrap()).unwrap();
         assert_eq!(data, picture_data);
         assert_eq!(mime, "image/jpeg");
+    }
+
+    #[test]
+    fn records_format_and_bitrate_of_lossy_tracks() {
+        let library = TempLibrary::new("format");
+        write_mp3(&library, "Album/01.mp3");
+        // not a readable audio file, so nothing is known about it
+        library.file("Album/02.flac", "");
+
+        let playlists = library.scan().playlists;
+        let tracks = &playlists[0].tracks;
+        assert_eq!(tracks[0].format, Some(AudioFormat::Mp3));
+        assert_eq!(tracks[0].bitrate_kbps, Some(128));
+        assert_eq!(tracks[1].format, None);
+        assert_eq!(tracks[1].bitrate_kbps, None);
+    }
+
+    fn encoded_track(format: AudioFormat, bitrate_kbps: Option<u32>) -> Track {
+        Track {
+            format: Some(format),
+            bitrate_kbps,
+            ..track("01.mp3", None, None)
+        }
+    }
+
+    fn playlist_of(tracks: Vec<Track>) -> Playlist {
+        Playlist {
+            tracks,
+            ..empty_playlist("Album")
+        }
+    }
+
+    #[test]
+    fn playlist_lists_each_format_once_in_order_of_appearance() {
+        let playlist = playlist_of(vec![
+            encoded_track(AudioFormat::Mp3, Some(320)),
+            encoded_track(AudioFormat::Flac, None),
+            encoded_track(AudioFormat::Mp3, Some(320)),
+            track("unreadable.mp3", None, None),
+        ]);
+        assert_eq!(playlist.format_labels(), vec!["MP3", "FLAC"]);
+        assert!(empty_playlist("Empty").format_labels().is_empty());
+    }
+
+    #[test]
+    fn playlist_bitrate_is_the_average_of_its_lossy_tracks() {
+        let vbr = playlist_of(vec![
+            encoded_track(AudioFormat::Mp3, Some(240)),
+            encoded_track(AudioFormat::Mp3, Some(251)),
+        ]);
+        assert_eq!(vbr.average_bitrate_kbps(), Some(246));
+
+        // a single lossless or unknown track makes one number meaningless
+        let mixed = playlist_of(vec![
+            encoded_track(AudioFormat::Mp3, Some(320)),
+            encoded_track(AudioFormat::Flac, None),
+        ]);
+        assert_eq!(mixed.average_bitrate_kbps(), None);
+        let unknown = playlist_of(vec![
+            encoded_track(AudioFormat::Opus, Some(160)),
+            encoded_track(AudioFormat::Opus, None),
+        ]);
+        assert_eq!(unknown.average_bitrate_kbps(), None);
+        assert_eq!(empty_playlist("Empty").average_bitrate_kbps(), None);
     }
 
     fn empty_playlist(title: &str) -> Playlist {
@@ -806,6 +955,8 @@ mod tests {
             artist: artist.map(|artist| artist.to_string()),
             title: title.map(|title| title.to_string()),
             has_cover_art: false,
+            format: None,
+            bitrate_kbps: None,
         }
     }
 

@@ -10,7 +10,7 @@ A MIDI-controlled audio player: white keys play albums/streams, black keys are t
 
 ```bash
 cargo build
-cargo test                                   # 43 unit tests, all inline #[cfg(test)] modules
+cargo test                                   # 46 unit tests, all inline #[cfg(test)] modules
 cargo test library::tests::skips_hidden_files_and_folders   # single test
 cargo test library::                         # one module's tests
 cargo run --bin miconau -- --library-folder <lib> --start-octave 4 \
@@ -48,6 +48,8 @@ The player never blocks the lock on disk I/O. Anything that reads files while se
 **Queue vs. mpv playlist.** `Player::queue` is a UI mirror of what mpv has appended after the current position; `remove_from_queue`/`clear_queue` translate queue indices to mpv playlist indices via `playlist-pos + 1 + i`. `on_track_started` decides direction by comparing mpv's `path` property against the head of the queue rather than by position — going back and playing on are indistinguishable from position alone.
 
 **Playlist identity.** A playlist is a *folder that directly contains audio files*; its title is the path relative to the library root (`Artist/Album`), which is what makes `Library::find_track` a folder lookup rather than a full scan. Only `.mp3`, `.flac`, `.wav`, `.ogg`, `.oga` and `.opus`, case-insensitive; dotfiles and Windows `$RECYCLE.BIN` folders skipped. (The upload form in the web UI is separately FLAC-only, hardcoded in `static/index.html` and `static/script.js`.)
+
+**Format and bitrate.** `read_track` takes the format from lofty's `file_type()` (the contents, not the extension, so `.ogg`/`.oga` show their real codec) and records a bitrate only for lossy formats. A playlist row shows every format it contains and an average bitrate only when all its tracks are lossy with a known bitrate.
 
 **Cover art.** The scan records only `has_cover_art` and a `cover_source` path — never the image bytes, which would be gigabytes for a large library. `read_cover_art` re-reads the file when a cover is actually served.
 

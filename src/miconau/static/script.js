@@ -64,6 +64,7 @@ function createPlaylistRow(playlist) {
   titleSpan.className = 'playlist-title';
 
   summary.appendChild(titleSpan);
+  summary.insertAdjacentHTML('beforeend', audioFormatHtml(playlist.format, playlist.bitrate_kbps));
   details.appendChild(summary);
 
   // Inner play button (visible when expanded, outside summary for accessibility)
@@ -121,6 +122,7 @@ function createPlaylistRow(playlist) {
                 <span class="track-title">${escapeHtml(track.title)}</span>
                 ${track.artist ? `<span class="track-artist">${escapeHtml(track.artist)}</span>` : ''}
               </button>
+              ${audioFormatHtml(track.format, track.bitrate_kbps)}
               <button class="track-queue-button" data-track-index="${track.index}">
                 <img src="/icons/queue_music.svg" alt="Add to queue" class="queue-icon">
               </button>
@@ -195,6 +197,16 @@ async function loadPlaylists() {
   } catch (error) {
     console.error('Error loading playlists:', error);
   }
+}
+
+/// The format of a track or playlist with, for lossy formats, the bitrate
+/// below it. The server only sends a bitrate for lossy formats.
+function audioFormatHtml(format, bitrateKbps) {
+  if (!format) return '';
+  return `<span class="audio-format">
+    <span class="audio-format-name">${escapeHtml(format)}</span>
+    ${bitrateKbps ? `<span class="audio-format-bitrate">${bitrateKbps} kbit/s</span>` : ''}
+  </span>`;
 }
 
 function escapeHtml(str) {
